@@ -14,21 +14,6 @@ Current scope:
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
 
-## Repository layout
-
-This plugin uses a standard Hermes dashboard plugin directory structure.
-
-```text
-hermes_memory_ui/
-├── README.md
-└── dashboard/
-    ├── manifest.json
-    ├── plugin_api.py
-    └── dist/
-        ├── index.js
-        └── style.css
-```
-
 ## Requirements
 
 - Hermes Agent with web dashboard support.
