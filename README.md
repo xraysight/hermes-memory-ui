@@ -1,6 +1,6 @@
 # Hermes Memory UI Plugin
 
-Read-only dashboard plugin for inspecting Hermes memory.
+Dashboard plugin for inspecting [Hermes Agent](https://github.com/NousResearch/hermes-agent) memory.
 
 Current scope:
 
@@ -209,7 +209,7 @@ The browser cannot and should not read local files or SQLite directly. `plugin_a
 
 ## Potential roadmap
 
-Plugin extensions to consider (feel free to contribute!):
+Plugin extensions to consider (**feel free to contribute!**):
 
 1. Safer mutation endpoints
    - built-in add/replace/remove via `tools.memory_tool.MemoryStore`
