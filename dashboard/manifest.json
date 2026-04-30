@@ -1,0 +1,14 @@
+{
+  "name": "hermes-memory-ui",
+  "label": "Memory",
+  "description": "Read-only Hermes dashboard plugin for built-in memory and holographic fact store.",
+  "icon": "Database",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/memory",
+    "position": "after:config"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

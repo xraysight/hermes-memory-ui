@@ -1,0 +1,298 @@
+.memory-ui-page {
+  display: flex;
+  flex-direction: column;
+  gap: calc(1rem * var(--spacing-mul, 1));
+}
+
+.memory-ui-hero {
+  overflow: hidden;
+}
+
+.memory-ui-section {
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.85rem * var(--spacing-mul, 1));
+}
+
+.memory-ui-section-header,
+.memory-ui-title-row,
+.memory-ui-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.memory-ui-section-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.memory-ui-section-header p {
+  margin: 0.2rem 0 0;
+  color: var(--color-muted-foreground);
+  font-size: 0.86rem;
+}
+
+.memory-ui-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.memory-ui-grid-2,
+.memory-ui-grid-4 {
+  display: grid;
+  gap: calc(0.8rem * var(--spacing-mul, 1));
+}
+
+.memory-ui-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.memory-ui-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .memory-ui-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .memory-ui-grid-2,
+  .memory-ui-grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .memory-ui-section-header,
+  .memory-ui-title-row,
+  .memory-ui-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.memory-ui-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-block: 0.95rem;
+}
+
+.memory-ui-stat-label,
+.memory-ui-stat-hint,
+.memory-ui-muted {
+  color: var(--color-muted-foreground);
+  font-size: 0.78rem;
+}
+
+.memory-ui-stat-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 1.25rem;
+  font-weight: 650;
+}
+
+.memory-ui-path {
+  margin: 0.5rem 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-card), transparent 18%);
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  padding: 0.5rem 0.65rem;
+}
+
+.memory-ui-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.65rem 0;
+}
+
+.memory-ui-usage-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-muted-foreground);
+  font-size: 0.76rem;
+}
+
+.memory-ui-usage-track {
+  height: 0.45rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-muted), transparent 25%);
+}
+
+.memory-ui-usage-fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 180ms ease;
+}
+
+.memory-ui-usage-ok {
+  background: var(--color-success, #22c55e);
+}
+
+.memory-ui-usage-warn {
+  background: var(--color-warning, #f59e0b);
+}
+
+.memory-ui-usage-danger {
+  background: var(--color-destructive, #ef4444);
+}
+
+.memory-ui-entry-list,
+.memory-ui-fact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+}
+
+.memory-ui-entry,
+.memory-ui-fact {
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-card), transparent 10%);
+  padding: 0.75rem;
+}
+
+.memory-ui-entry {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+}
+
+.memory-ui-entry-index,
+.memory-ui-fact-id {
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.74rem;
+}
+
+.memory-ui-entry-content,
+.memory-ui-fact-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+  line-height: 1.48;
+}
+
+.memory-ui-fact-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.memory-ui-trust {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  padding: 0.1rem 0.45rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+}
+
+.memory-ui-trust-high {
+  color: var(--color-success, #22c55e);
+  border-color: color-mix(in srgb, var(--color-success, #22c55e), transparent 40%);
+}
+
+.memory-ui-trust-mid {
+  color: var(--color-warning, #f59e0b);
+  border-color: color-mix(in srgb, var(--color-warning, #f59e0b), transparent 40%);
+}
+
+.memory-ui-trust-low {
+  color: var(--color-muted-foreground);
+}
+
+.memory-ui-tags {
+  margin-top: 0.5rem;
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+}
+
+.memory-ui-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(130px, 0.55fr)) auto;
+  align-items: end;
+  gap: 0.75rem;
+  padding-block: 0.9rem;
+}
+
+@media (max-width: 1050px) {
+  .memory-ui-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .memory-ui-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+.memory-ui-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.memory-ui-control label {
+  color: var(--color-muted-foreground);
+  font-size: 0.74rem;
+}
+
+.memory-ui-select {
+  min-height: 2.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius, 0.5rem);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  padding: 0 0.65rem;
+}
+
+.memory-ui-refresh {
+  min-height: 2.35rem;
+}
+
+.memory-ui-empty,
+.memory-ui-error {
+  border: 1px dashed var(--color-border);
+  color: var(--color-muted-foreground);
+  padding: 0.85rem;
+  font-size: 0.86rem;
+}
+
+.memory-ui-error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--color-destructive, #ef4444), transparent 30%);
+  color: var(--color-destructive, #ef4444);
+  background: color-mix(in srgb, var(--color-destructive, #ef4444), transparent 92%);
+}
+
+.memory-ui-link-button {
+  border: 0;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0;
+}
+
+.memory-ui-link-button:hover {
+  color: var(--color-foreground);
+  text-decoration: underline;
+}
