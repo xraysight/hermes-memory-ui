@@ -14,6 +14,16 @@ Current scope:
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
 
+## Screenshots
+
+Built-in memory view:
+
+![Hermes Memory UI built-in memory view](docs/assets/hermes-memory-dashboard1.png)
+
+Holographic memory view:
+
+![Hermes Memory UI holographic memory view](docs/assets/hermes-memory-dashboard2.png)
+
 ## Requirements
 
 - Hermes Agent with web dashboard support.
