@@ -13,7 +13,6 @@ Current scope:
     + facts, categories, trust scores, retrieval counters, timestamps
   * Mem0 memory:
     + read-only Mem0 Platform memories via Hermes' `mem0` provider config
-    + optional fixture mode for safe demos/tests without API calls
     + memories, user/agent scope, scores returned by search, timestamps, metadata
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
@@ -27,6 +26,10 @@ Built-in memory view:
 Holographic memory view:
 
 ![Hermes Memory UI holographic memory view](docs/assets/hermes-memory-dashboard2.png)
+
+Mem0 memory view:
+
+![Hermes Memory UI Mem0 memory view](docs/assets/hermes-memory-dashboard3.png)
 
 ## Requirements
 
@@ -86,7 +89,7 @@ Top summary:
 - active Hermes home
 - snapshot generation time
 - holographic total fact count only when `memory.provider` is currently `holographic`
-- Mem0 memory count only when `memory.provider` is currently `mem0` or fixture mode is configured
+- Mem0 memory count only when `memory.provider` is currently `mem0`
 
 Built-in memory section:
 
@@ -107,14 +110,12 @@ Holographic memory section, displayed only when `memory.provider` is currently `
 - filters for search, category, min trust, and limit; click `Apply / refresh` to run them
 - fact cards with category, trust score, counters, content, tags, timestamps
 
-Mem0 memory section, displayed when `memory.provider` is currently `mem0` or a fixture path is configured:
+Mem0 memory section, displayed when `memory.provider` is currently `mem0`:
 
 - whether Mem0 is the active provider
-- whether fixture mode or API mode is being used
-- whether an API key is present, without exposing the key
-- configured `user_id` and `agent_id`
-- memories returned by `get_all()` or `search()` after clicking `Apply / refresh`
-- memory cards with score, scope, content, timestamps, and metadata
+- whether an API key is present and configured `user_id` and `agent_id`
+- memories returned by `get_all()` or `search()` after clicking `Apply / refresh` button
+- memory cards with score, user/agent scope, content, timestamps, and metadata
 
 ## Holographic DB path resolution
 
@@ -138,56 +139,39 @@ The SQLite connection is opened in read-only mode using `mode=ro`.
 
 ## Mem0 configuration
 
-Mem0 support uses the same configuration shape as Hermes' bundled `mem0` memory provider.
-It reads non-secret settings from `$HERMES_HOME/mem0.json` and environment variables:
+Mem0 support follows Hermes' bundled `mem0` memory provider convention:
+
+- put secrets in `$HERMES_HOME/.env`, especially `MEM0_API_KEY`
+- put non-secret Mem0 scope/config in `$HERMES_HOME/mem0.json`
+
+Example `$HERMES_HOME/.env`:
+
+```bash
+MEM0_API_KEY=your-key
+```
+
+Example `$HERMES_HOME/mem0.json`:
 
 ```json
 {
-  "api_key": "...",
   "user_id": "hermes-user",
   "agent_id": "hermes",
   "rerank": true
 }
 ```
 
-Environment fallbacks:
+Environment values also supported by Hermes' provider:
 
 - `MEM0_API_KEY`
 - `MEM0_USER_ID`
 - `MEM0_AGENT_ID`
 - `MEM0_RERANK`
 
-The API key is only used server-side to instantiate `mem0.MemoryClient`; it is never returned in plugin responses.
+`mem0.json` may technically override these values if fields are present, matching Hermes' provider behavior, but keeping `api_key` in `.env` is the recommended safer layout. The API key is only used server-side to instantiate `mem0.MemoryClient`; it is never returned in plugin responses.
 The plugin performs read-only calls:
 
 - `client.get_all(filters={"user_id": ...})` when no search query is provided
 - `client.search(query=..., filters={"user_id": ...}, rerank=..., top_k=...)` when search is provided
-
-### Mem0 fixture mode
-
-For demos and tests without API credentials or network calls, configure a fixture file:
-
-```yaml
-plugins:
-  hermes-memory-ui:
-    mem0_fixture_path: $HERMES_HOME/mem0-fixture.json
-```
-
-or set:
-
-```bash
-HERMES_MEMORY_UI_MEM0_FIXTURE=/path/to/mem0-fixture.json
-```
-
-Fixture JSON can be either a list or a Mem0-style object with `results`:
-
-```json
-{
-  "results": [
-    {"id": "m1", "memory": "User prefers Polish replies", "user_id": "demo-user"}
-  ]
-}
-```
 
 ## API endpoints
 
@@ -239,12 +223,12 @@ curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/holographic?limit=100&m
 
 ### GET `/mem0`
 
-Returns read-only memories from Mem0 API mode or fixture mode.
+Returns read-only memories from the Mem0 Platform API.
 
 Query parameters:
 
 - `limit`: 1-2000, default 500
-- `search`: optional search query; API mode uses Mem0 semantic search, fixture mode uses local substring search
+- `search`: optional search query; uses Mem0 semantic search
 
 Example:
 

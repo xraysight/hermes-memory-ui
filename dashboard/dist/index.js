@@ -263,16 +263,16 @@
       e("div", { className: "memory-ui-section-header" },
         e("div", null,
           e("h2", null, "Mem0 memory"),
-          e("p", null, "Read-only view of Mem0 Platform memories scoped by the configured user_id. Fixture mode is supported for safe demos.")
+          e("p", null, "Read-only view of Mem0 Platform memories scoped by the configured user_id.")
         ),
         e("div", { className: "memory-ui-badges" },
           e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
-          e(Badge, { variant: data.fixture_mode ? "outline" : "secondary" }, data.fixture_mode ? "fixture mode" : "api mode"),
+          e(Badge, { variant: "outline" }, "api mode"),
           e(Badge, { variant: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key")
         )
       ),
       e("div", { className: "memory-ui-grid-4" },
-        e(StatCard, { label: "Total memories", value: data.total_memories || 0, hint: data.fixture_mode ? "fixture rows" : "returned by Mem0" }),
+        e(StatCard, { label: "Total memories", value: data.total_memories || 0, hint: "returned by Mem0" }),
         e(StatCard, { label: "Shown", value: data.memory_count || 0, hint: "after filters" }),
         e(StatCard, { label: "User ID", value: data.user_id || "—", hint: "read filter" }),
         e(StatCard, { label: "Agent ID", value: data.agent_id || "—", hint: "write attribution only" })
@@ -283,7 +283,7 @@
             e("label", null, "Search"),
             e(Input, {
               value: filters.search,
-              placeholder: "semantic search in API mode, substring in fixture mode...",
+              placeholder: "semantic search in Mem0...",
               onChange: function (ev) { setFilters(Object.assign({}, filters, { search: ev.target.value })); }
             })
           ),
@@ -304,7 +304,7 @@
         )
       ),
       e(ErrorBox, { error: data.error }),
-      data.fixture_path ? e("div", { className: "memory-ui-path" }, data.fixture_path) : e("div", { className: "memory-ui-path" }, data.config_path),
+      e("div", { className: "memory-ui-path" }, data.config_path),
       e("div", { className: "memory-ui-fact-list" },
         data.memories && data.memories.length
           ? data.memories.map(function (memory) { return e(Mem0Row, { key: memory.id, memory: memory }); })
@@ -343,7 +343,7 @@
     const holographic = snapshot && snapshot.holographic;
     const mem0 = snapshot && snapshot.mem0;
     const showHolographic = !!(holographic && holographic.provider_configured);
-    const showMem0 = !!(mem0 && (mem0.provider_configured || mem0.fixture_mode));
+    const showMem0 = !!(mem0 && mem0.provider_configured);
     const heroGridClass = showHolographic || showMem0 ? "memory-ui-grid-4" : "memory-ui-grid-2";
 
     return e("div", { className: "memory-ui-page" },
@@ -364,7 +364,7 @@
           snapshot ? e("div", { className: heroGridClass },
             e(StatCard, { label: "Built-in entries", value: builtin ? builtin.total_entries : 0, hint: "MEMORY.md + USER.md" }),
             showHolographic ? e(StatCard, { label: "Facts", value: holographic ? holographic.total_facts : 0, hint: "holographic facts" }) : null,
-            showMem0 ? e(StatCard, { label: "Mem0", value: mem0 ? mem0.total_memories : 0, hint: mem0 && mem0.fixture_mode ? "fixture memories" : "Mem0 memories" }) : null,
+            showMem0 ? e(StatCard, { label: "Mem0", value: mem0 ? mem0.total_memories : 0, hint: "Mem0 memories" }) : null,
             e(StatCard, { label: "Hermes home", value: builtin ? "active" : "—", hint: builtin ? builtin.hermes_home : "loading" }),
             e(StatCard, { label: "Generated", value: snapshot.generated_at ? fmtTime(snapshot.generated_at) : "—", hint: "snapshot time" })
           ) : e(EmptyState, null, "Loading memory snapshot...")

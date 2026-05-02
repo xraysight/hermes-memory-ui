@@ -17,49 +17,13 @@ def load_plugin_api(monkeypatch, tmp_path):
     return module
 
 
-def test_mem0_fixture_payload_is_read_only_and_searchable(monkeypatch, tmp_path):
-    fixture = tmp_path / "mem0-fixture.json"
-    fixture.write_text(
-        json.dumps(
-            {
-                "results": [
-                    {"id": "m1", "memory": "User prefers Polish replies", "user_id": "demo-user"},
-                    {"id": "m2", "memory": "Project uses FastAPI dashboard plugins", "user_id": "demo-user"},
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "config.yaml").write_text(
-        """
-memory:
-  provider: mem0
-plugins:
-  hermes-memory-ui:
-    mem0_fixture_path: $HERMES_HOME/mem0-fixture.json
-""".strip(),
-        encoding="utf-8",
-    )
-
-    module = load_plugin_api(monkeypatch, tmp_path)
-    payload = module._mem0_payload(search="polish", limit=10)
-
-    assert payload["provider_configured"] is True
-    assert payload["fixture_mode"] is True
-    assert payload["api_key_present"] is False
-    assert payload["total_memories"] == 2
-    assert payload["memory_count"] == 1
-    assert payload["memories"][0]["id"] == "m1"
-    assert payload["memories"][0]["memory"] == "User prefers Polish replies"
-    assert "_api_key" not in payload
-
-
 def test_mem0_config_hides_api_key_and_uses_memory_client(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
     (tmp_path / "mem0.json").write_text(
-        json.dumps({"api_key": "secret-token", "user_id": "piotr-test", "agent_id": "hermes-test"}),
+        json.dumps({"user_id": "piotr-test", "agent_id": "hermes-test"}),
         encoding="utf-8",
     )
+    monkeypatch.setenv("MEM0_API_KEY", "secret-token")
 
     calls = []
 
@@ -90,7 +54,8 @@ def test_mem0_config_hides_api_key_and_uses_memory_client(monkeypatch, tmp_path)
 
 def test_mem0_search_uses_search_endpoint(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
-    (tmp_path / "mem0.json").write_text(json.dumps({"api_key": "secret-token", "user_id": "u1"}), encoding="utf-8")
+    (tmp_path / "mem0.json").write_text(json.dumps({"user_id": "u1"}), encoding="utf-8")
+    monkeypatch.setenv("MEM0_API_KEY", "secret-token")
 
     calls = []
 

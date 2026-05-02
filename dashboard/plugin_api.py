@@ -290,13 +290,6 @@ def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
             value = file_cfg.get(key)
         return value
 
-    fixture_value = (
-        _dig(config, "plugins", "hermes-memory-ui", "mem0_fixture_path", default=None)
-        or _dig(config, "memory", "mem0_fixture_path", default=None)
-        or os.environ.get("HERMES_MEMORY_UI_MEM0_FIXTURE")
-    )
-    fixture_path = _expand_path(fixture_value, home)
-
     api_key = pick("api_key", "MEM0_API_KEY", "")
     rerank = pick("rerank", "MEM0_RERANK", True)
     if isinstance(rerank, str):
@@ -310,8 +303,6 @@ def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "rerank": rerank,
         # Keep the real value private and local to the API call path.
         "_api_key": api_key,
-        "fixture_path": str(fixture_path) if fixture_path else None,
-        "fixture_exists": fixture_path.exists() if fixture_path else False,
     }
 
 
@@ -342,11 +333,6 @@ def _normalize_mem0_memory(item: Any, index: int) -> Dict[str, Any]:
     }
 
 
-def _load_mem0_fixture(path: Path) -> List[Dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [_normalize_mem0_memory(item, index) for index, item in enumerate(_unwrap_mem0_results(data))]
-
-
 def _filter_mem0_memories(memories: List[Dict[str, Any]], search: Optional[str], limit: int) -> List[Dict[str, Any]]:
     if search:
         needle = search.casefold()
@@ -375,9 +361,6 @@ def _mem0_payload(
         "api_key_present": mem0_cfg["api_key_present"],
         "user_id": mem0_cfg["user_id"],
         "agent_id": mem0_cfg["agent_id"],
-        "fixture_path": mem0_cfg["fixture_path"],
-        "fixture_exists": mem0_cfg["fixture_exists"],
-        "fixture_mode": bool(mem0_cfg["fixture_exists"]),
         "memories": [],
         "memory_count": 0,
         "total_memories": 0,
@@ -388,21 +371,14 @@ def _mem0_payload(
     }
 
     try:
-        if mem0_cfg["fixture_exists"] and mem0_cfg["fixture_path"]:
-            all_memories = _load_mem0_fixture(Path(mem0_cfg["fixture_path"]))
-            base["total_memories"] = len(all_memories)
-            base["memories"] = _filter_mem0_memories(all_memories, search, limit)
-            base["memory_count"] = len(base["memories"])
-            return base
-
         if not mem0_cfg["api_key_present"]:
-            base["error"] = "Mem0 API key not configured. Set MEM0_API_KEY or $HERMES_HOME/mem0.json, or configure plugins.hermes-memory-ui.mem0_fixture_path for fixture mode."
+            base["error"] = "Mem0 API key not configured. Set MEM0_API_KEY in $HERMES_HOME/.env or the process environment."
             return base
 
         try:
             from mem0 import MemoryClient  # type: ignore
         except ImportError:
-            base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai or use fixture mode."
+            base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai."
             return base
 
         client = MemoryClient(api_key=mem0_cfg["_api_key"])
@@ -451,8 +427,6 @@ async def status() -> Dict[str, Any]:
             "api_key_present": mem0_cfg["api_key_present"],
             "user_id": mem0_cfg["user_id"],
             "agent_id": mem0_cfg["agent_id"],
-            "fixture_path": mem0_cfg["fixture_path"],
-            "fixture_exists": mem0_cfg["fixture_exists"],
             "provider_configured": _dig(config, "memory", "provider", default=None) == "mem0",
         },
         "generated_at": time.time(),
