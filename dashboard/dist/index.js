@@ -223,7 +223,7 @@
               e("option", { value: "2000" }, "2000")
             )
           ),
-          e(Button, { onClick: refresh, className: "memory-ui-refresh" }, "Refresh")
+          e(Button, { onClick: refresh, className: "memory-ui-refresh" }, "Apply / refresh")
         )
       ),
       e(ErrorBox, { error: data.error }),
@@ -232,6 +232,83 @@
         data.facts && data.facts.length
           ? data.facts.map(function (fact) { return e(FactRow, { key: fact.fact_id, fact: fact }); })
           : e(EmptyState, null, data.exists ? "No facts match the current filters." : "Holographic database does not exist yet.")
+      )
+    );
+  }
+
+  function Mem0Row(props) {
+    const memory = props.memory;
+    const metadata = memory.metadata && Object.keys(memory.metadata).length ? JSON.stringify(memory.metadata) : "";
+    return e("div", { className: "memory-ui-fact" },
+      e("div", { className: "memory-ui-fact-top" },
+        e("div", { className: "memory-ui-fact-id" }, "#" + memory.id),
+        memory.score !== null && memory.score !== undefined ? e(Badge, { variant: "outline" }, "score " + Number(memory.score).toFixed(3)) : null,
+        memory.user_id ? e(Badge, { variant: "outline" }, "user " + memory.user_id) : null,
+        memory.agent_id ? e(Badge, { variant: "outline" }, "agent " + memory.agent_id) : null
+      ),
+      e("div", { className: "memory-ui-fact-content" }, memory.memory || ""),
+      metadata ? e("div", { className: "memory-ui-tags" }, "metadata: ", metadata) : null,
+      e("div", { className: "memory-ui-muted" }, "Updated: ", fmtTime(memory.updated_at), " · Created: ", fmtTime(memory.created_at))
+    );
+  }
+
+  function Mem0Section(props) {
+    const data = props.mem0;
+    const filters = props.filters;
+    const setFilters = props.setFilters;
+    const refresh = props.refresh;
+    if (!data) return null;
+
+    return e("div", { className: "memory-ui-section" },
+      e("div", { className: "memory-ui-section-header" },
+        e("div", null,
+          e("h2", null, "Mem0 memory"),
+          e("p", null, "Read-only view of Mem0 Platform memories scoped by the configured user_id. Fixture mode is supported for safe demos.")
+        ),
+        e("div", { className: "memory-ui-badges" },
+          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { variant: data.fixture_mode ? "outline" : "secondary" }, data.fixture_mode ? "fixture mode" : "api mode"),
+          e(Badge, { variant: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key")
+        )
+      ),
+      e("div", { className: "memory-ui-grid-4" },
+        e(StatCard, { label: "Total memories", value: data.total_memories || 0, hint: data.fixture_mode ? "fixture rows" : "returned by Mem0" }),
+        e(StatCard, { label: "Shown", value: data.memory_count || 0, hint: "after filters" }),
+        e(StatCard, { label: "User ID", value: data.user_id || "—", hint: "read filter" }),
+        e(StatCard, { label: "Agent ID", value: data.agent_id || "—", hint: "write attribution only" })
+      ),
+      e(Card, null,
+        e(CardContent, { className: "memory-ui-controls memory-ui-controls-compact" },
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Search"),
+            e(Input, {
+              value: filters.search,
+              placeholder: "semantic search in API mode, substring in fixture mode...",
+              onChange: function (ev) { setFilters(Object.assign({}, filters, { search: ev.target.value })); }
+            })
+          ),
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Limit"),
+            e("select", {
+              className: "memory-ui-select",
+              value: filters.limit,
+              onChange: function (ev) { setFilters(Object.assign({}, filters, { limit: ev.target.value })); }
+            },
+              e("option", { value: "100" }, "100"),
+              e("option", { value: "500" }, "500"),
+              e("option", { value: "1000" }, "1000"),
+              e("option", { value: "2000" }, "2000")
+            )
+          ),
+          e(Button, { onClick: refresh, className: "memory-ui-refresh" }, "Apply / refresh")
+        )
+      ),
+      e(ErrorBox, { error: data.error }),
+      data.fixture_path ? e("div", { className: "memory-ui-path" }, data.fixture_path) : e("div", { className: "memory-ui-path" }, data.config_path),
+      e("div", { className: "memory-ui-fact-list" },
+        data.memories && data.memories.length
+          ? data.memories.map(function (memory) { return e(Mem0Row, { key: memory.id, memory: memory }); })
+          : e(EmptyState, null, data.error ? "Mem0 memories are unavailable." : "No Mem0 memories match the current filters.")
       )
     );
   }
@@ -260,11 +337,14 @@
         .finally(function () { setLoading(false); });
     }
 
-    useEffect(function () { refresh(); }, [query]);
+    useEffect(function () { refresh(); }, []);
 
     const builtin = snapshot && snapshot.builtin;
     const holographic = snapshot && snapshot.holographic;
+    const mem0 = snapshot && snapshot.mem0;
     const showHolographic = !!(holographic && holographic.provider_configured);
+    const showMem0 = !!(mem0 && (mem0.provider_configured || mem0.fixture_mode));
+    const heroGridClass = showHolographic || showMem0 ? "memory-ui-grid-4" : "memory-ui-grid-2";
 
     return e("div", { className: "memory-ui-page" },
       e(Card, { className: "memory-ui-hero" },
@@ -281,9 +361,10 @@
         ),
         e(CardContent, null,
           e(ErrorBox, { error: error }),
-          snapshot ? e("div", { className: showHolographic ? "memory-ui-grid-4" : "memory-ui-grid-2" },
+          snapshot ? e("div", { className: heroGridClass },
             e(StatCard, { label: "Built-in entries", value: builtin ? builtin.total_entries : 0, hint: "MEMORY.md + USER.md" }),
             showHolographic ? e(StatCard, { label: "Facts", value: holographic ? holographic.total_facts : 0, hint: "holographic facts" }) : null,
+            showMem0 ? e(StatCard, { label: "Mem0", value: mem0 ? mem0.total_memories : 0, hint: mem0 && mem0.fixture_mode ? "fixture memories" : "Mem0 memories" }) : null,
             e(StatCard, { label: "Hermes home", value: builtin ? "active" : "—", hint: builtin ? builtin.hermes_home : "loading" }),
             e(StatCard, { label: "Generated", value: snapshot.generated_at ? fmtTime(snapshot.generated_at) : "—", hint: "snapshot time" })
           ) : e(EmptyState, null, "Loading memory snapshot...")
@@ -294,6 +375,10 @@
         showHolographic ? e(React.Fragment, null,
           e(Separator, null),
           e(HolographicSection, { holographic: holographic, filters: filters, setFilters: setFilters, refresh: refresh })
+        ) : null,
+        showMem0 ? e(React.Fragment, null,
+          e(Separator, null),
+          e(Mem0Section, { mem0: mem0, filters: filters, setFilters: setFilters, refresh: refresh })
         ) : null
       ) : null
     );

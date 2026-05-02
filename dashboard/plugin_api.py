@@ -12,6 +12,7 @@ FTS/HRR maintenance, and mirroring semantics are preserved.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -35,6 +36,8 @@ DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
 DEFAULT_FACT_LIMIT = 500
 MAX_FACT_LIMIT = 2000
+DEFAULT_MEM0_LIMIT = 500
+MAX_MEM0_LIMIT = 2000
 
 
 def _hermes_home() -> Path:
@@ -261,14 +264,172 @@ def _holographic_payload(
     return base
 
 
+def _expand_path(value: Optional[str], home: Optional[Path] = None) -> Optional[Path]:
+    if not value or not isinstance(value, str):
+        return None
+    home = home or _hermes_home()
+    expanded = value.replace("$HERMES_HOME", str(home)).replace("${HERMES_HOME}", str(home))
+    return Path(expanded).expanduser()
+
+
+def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Load non-secret Mem0 configuration for read-only dashboard access."""
+    home = _hermes_home()
+    config_path = home / "mem0.json"
+    file_cfg: Dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8")) or {}
+            file_cfg = data if isinstance(data, dict) else {}
+        except Exception:
+            file_cfg = {}
+
+    def pick(key: str, env_key: str, default: Any = None) -> Any:
+        value = os.environ.get(env_key, default)
+        if key in file_cfg and file_cfg.get(key) not in (None, ""):
+            value = file_cfg.get(key)
+        return value
+
+    fixture_value = (
+        _dig(config, "plugins", "hermes-memory-ui", "mem0_fixture_path", default=None)
+        or _dig(config, "memory", "mem0_fixture_path", default=None)
+        or os.environ.get("HERMES_MEMORY_UI_MEM0_FIXTURE")
+    )
+    fixture_path = _expand_path(fixture_value, home)
+
+    api_key = pick("api_key", "MEM0_API_KEY", "")
+    rerank = pick("rerank", "MEM0_RERANK", True)
+    if isinstance(rerank, str):
+        rerank = rerank.strip().lower() not in {"0", "false", "no", "off"}
+    return {
+        "config_path": str(config_path),
+        "config_exists": config_path.exists(),
+        "api_key_present": bool(api_key),
+        "user_id": pick("user_id", "MEM0_USER_ID", "hermes-user"),
+        "agent_id": pick("agent_id", "MEM0_AGENT_ID", "hermes"),
+        "rerank": rerank,
+        # Keep the real value private and local to the API call path.
+        "_api_key": api_key,
+        "fixture_path": str(fixture_path) if fixture_path else None,
+        "fixture_exists": fixture_path.exists() if fixture_path else False,
+    }
+
+
+def _unwrap_mem0_results(response: Any) -> List[Any]:
+    if isinstance(response, dict):
+        results = response.get("results", response.get("memories", []))
+        return results if isinstance(results, list) else []
+    if isinstance(response, list):
+        return response
+    return []
+
+
+def _normalize_mem0_memory(item: Any, index: int) -> Dict[str, Any]:
+    if isinstance(item, str):
+        return {"id": str(index + 1), "memory": item, "score": None, "created_at": None, "updated_at": None, "metadata": {}}
+    if not isinstance(item, dict):
+        return {"id": str(index + 1), "memory": str(item), "score": None, "created_at": None, "updated_at": None, "metadata": {}}
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return {
+        "id": item.get("id") or item.get("memory_id") or item.get("uuid") or str(index + 1),
+        "memory": item.get("memory") or item.get("text") or item.get("content") or "",
+        "score": item.get("score"),
+        "created_at": item.get("created_at") or item.get("createdAt"),
+        "updated_at": item.get("updated_at") or item.get("updatedAt"),
+        "user_id": item.get("user_id") or item.get("userId"),
+        "agent_id": item.get("agent_id") or item.get("agentId"),
+        "metadata": metadata,
+    }
+
+
+def _load_mem0_fixture(path: Path) -> List[Dict[str, Any]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [_normalize_mem0_memory(item, index) for index, item in enumerate(_unwrap_mem0_results(data))]
+
+
+def _filter_mem0_memories(memories: List[Dict[str, Any]], search: Optional[str], limit: int) -> List[Dict[str, Any]]:
+    if search:
+        needle = search.casefold()
+        memories = [m for m in memories if needle in str(m.get("memory", "")).casefold()]
+    return memories[:limit]
+
+
+def _mem0_payload(
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    limit: int = DEFAULT_MEM0_LIMIT,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    config = config if config is not None else _read_yaml(_hermes_home() / "config.yaml")
+    provider = _dig(config, "memory", "provider", default=None)
+    mem0_cfg = _load_mem0_config(config)
+    limit = max(1, min(int(limit or DEFAULT_MEM0_LIMIT), MAX_MEM0_LIMIT))
+
+    base: Dict[str, Any] = {
+        "id": "mem0",
+        "label": "Mem0 memory",
+        "provider_configured": provider == "mem0",
+        "mode": "read-only",
+        "config_path": mem0_cfg["config_path"],
+        "config_exists": mem0_cfg["config_exists"],
+        "api_key_present": mem0_cfg["api_key_present"],
+        "user_id": mem0_cfg["user_id"],
+        "agent_id": mem0_cfg["agent_id"],
+        "fixture_path": mem0_cfg["fixture_path"],
+        "fixture_exists": mem0_cfg["fixture_exists"],
+        "fixture_mode": bool(mem0_cfg["fixture_exists"]),
+        "memories": [],
+        "memory_count": 0,
+        "total_memories": 0,
+        "limit": limit,
+        "search": search or "",
+        "error": None,
+        "generated_at": time.time(),
+    }
+
+    try:
+        if mem0_cfg["fixture_exists"] and mem0_cfg["fixture_path"]:
+            all_memories = _load_mem0_fixture(Path(mem0_cfg["fixture_path"]))
+            base["total_memories"] = len(all_memories)
+            base["memories"] = _filter_mem0_memories(all_memories, search, limit)
+            base["memory_count"] = len(base["memories"])
+            return base
+
+        if not mem0_cfg["api_key_present"]:
+            base["error"] = "Mem0 API key not configured. Set MEM0_API_KEY or $HERMES_HOME/mem0.json, or configure plugins.hermes-memory-ui.mem0_fixture_path for fixture mode."
+            return base
+
+        try:
+            from mem0 import MemoryClient  # type: ignore
+        except ImportError:
+            base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai or use fixture mode."
+            return base
+
+        client = MemoryClient(api_key=mem0_cfg["_api_key"])
+        filters = {"user_id": mem0_cfg["user_id"]}
+        if search:
+            response = client.search(query=search, filters=filters, rerank=mem0_cfg["rerank"], top_k=limit)
+        else:
+            response = client.get_all(filters=filters)
+        all_memories = [_normalize_mem0_memory(item, index) for index, item in enumerate(_unwrap_mem0_results(response))]
+        base["total_memories"] = len(all_memories)
+        base["memories"] = _filter_mem0_memories(all_memories, None, limit)
+        base["memory_count"] = len(base["memories"])
+    except Exception as exc:
+        base["error"] = str(exc)
+
+    return base
+
+
 @router.get("/status")
 async def status() -> Dict[str, Any]:
     home = _hermes_home()
     config = _read_yaml(home / "config.yaml")
     db_path = _resolve_holographic_db(config)
+    mem0_cfg = _load_mem0_config(config)
     return {
         "plugin": "hermes-memory-ui",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "mode": "read-only",
         "hermes_home": str(home),
         "config_path": str(home / "config.yaml"),
@@ -283,6 +444,16 @@ async def status() -> Dict[str, Any]:
             "db_path": str(db_path),
             "db_exists": db_path.exists(),
             "provider_configured": _dig(config, "memory", "provider", default=None) == "holographic",
+        },
+        "mem0": {
+            "config_path": mem0_cfg["config_path"],
+            "config_exists": mem0_cfg["config_exists"],
+            "api_key_present": mem0_cfg["api_key_present"],
+            "user_id": mem0_cfg["user_id"],
+            "agent_id": mem0_cfg["agent_id"],
+            "fixture_path": mem0_cfg["fixture_path"],
+            "fixture_exists": mem0_cfg["fixture_exists"],
+            "provider_configured": _dig(config, "memory", "provider", default=None) == "mem0",
         },
         "generated_at": time.time(),
     }
@@ -303,6 +474,14 @@ async def holographic(
     return _holographic_payload(limit=limit, category=category or None, min_trust=min_trust, search=search or None)
 
 
+@router.get("/mem0")
+async def mem0(
+    limit: int = Query(DEFAULT_MEM0_LIMIT, ge=1, le=MAX_MEM0_LIMIT),
+    search: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    return _mem0_payload(limit=limit, search=search or None)
+
+
 @router.get("/snapshot")
 async def snapshot(
     limit: int = Query(DEFAULT_FACT_LIMIT, ge=1, le=MAX_FACT_LIMIT),
@@ -313,7 +492,7 @@ async def snapshot(
     config = _read_yaml(_hermes_home() / "config.yaml")
     return {
         "plugin": "hermes-memory-ui",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "mode": "read-only",
         "builtin": _builtin_payload(config),
         "holographic": _holographic_payload(
@@ -323,5 +502,6 @@ async def snapshot(
             min_trust=min_trust,
             search=search or None,
         ),
+        "mem0": _mem0_payload(config, limit=limit, search=search or None),
         "generated_at": time.time(),
     }

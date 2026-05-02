@@ -232,6 +232,10 @@
   padding-block: 0.9rem;
 }
 
+.memory-ui-controls-compact {
+  grid-template-columns: minmax(220px, 1.4fr) minmax(130px, 0.35fr) auto;
+}
+
 @media (max-width: 1050px) {
   .memory-ui-controls {
     grid-template-columns: 1fr 1fr;

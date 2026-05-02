@@ -7,10 +7,14 @@ Current scope:
 - Built-in memory:
   * `MEMORY.md` — agent notes / environment facts / project conventions
   * `USER.md` — user profile / preferences
-- External memory provider:
-  * Holographic memory: 
+- External memory providers:
+  * Holographic memory:
     + local SQLite fact store, default: `$HERMES_HOME/memory_store.db`
     + facts, categories, trust scores, retrieval counters, timestamps
+  * Mem0 memory:
+    + read-only Mem0 Platform memories via Hermes' `mem0` provider config
+    + optional fixture mode for safe demos/tests without API calls
+    + memories, user/agent scope, scores returned by search, timestamps, metadata
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
 
@@ -31,7 +35,7 @@ Holographic memory view:
   `https://hermes-agent.nousresearch.com/docs/user-guide/features/extending-the-dashboard`
 - Optional: external memory provider enabled.
 
-The built-in memory view works always, while external memory provider only when configured.
+The built-in memory view works always, while external memory provider sections are shown only when configured.
 
 ## Installation
 
@@ -82,6 +86,7 @@ Top summary:
 - active Hermes home
 - snapshot generation time
 - holographic total fact count only when `memory.provider` is currently `holographic`
+- Mem0 memory count only when `memory.provider` is currently `mem0` or fixture mode is configured
 
 Built-in memory section:
 
@@ -99,8 +104,17 @@ Holographic memory section, displayed only when `memory.provider` is currently `
 - facts shown after filters
 - entity count
 - memory bank count
-- filters for search, category, min trust, and limit
+- filters for search, category, min trust, and limit; click `Apply / refresh` to run them
 - fact cards with category, trust score, counters, content, tags, timestamps
+
+Mem0 memory section, displayed when `memory.provider` is currently `mem0` or a fixture path is configured:
+
+- whether Mem0 is the active provider
+- whether fixture mode or API mode is being used
+- whether an API key is present, without exposing the key
+- configured `user_id` and `agent_id`
+- memories returned by `get_all()` or `search()` after clicking `Apply / refresh`
+- memory cards with score, scope, content, timestamps, and metadata
 
 ## Holographic DB path resolution
 
@@ -122,6 +136,59 @@ $HERMES_HOME/memory_store.db
 
 The SQLite connection is opened in read-only mode using `mode=ro`.
 
+## Mem0 configuration
+
+Mem0 support uses the same configuration shape as Hermes' bundled `mem0` memory provider.
+It reads non-secret settings from `$HERMES_HOME/mem0.json` and environment variables:
+
+```json
+{
+  "api_key": "...",
+  "user_id": "hermes-user",
+  "agent_id": "hermes",
+  "rerank": true
+}
+```
+
+Environment fallbacks:
+
+- `MEM0_API_KEY`
+- `MEM0_USER_ID`
+- `MEM0_AGENT_ID`
+- `MEM0_RERANK`
+
+The API key is only used server-side to instantiate `mem0.MemoryClient`; it is never returned in plugin responses.
+The plugin performs read-only calls:
+
+- `client.get_all(filters={"user_id": ...})` when no search query is provided
+- `client.search(query=..., filters={"user_id": ...}, rerank=..., top_k=...)` when search is provided
+
+### Mem0 fixture mode
+
+For demos and tests without API credentials or network calls, configure a fixture file:
+
+```yaml
+plugins:
+  hermes-memory-ui:
+    mem0_fixture_path: $HERMES_HOME/mem0-fixture.json
+```
+
+or set:
+
+```bash
+HERMES_MEMORY_UI_MEM0_FIXTURE=/path/to/mem0-fixture.json
+```
+
+Fixture JSON can be either a list or a Mem0-style object with `results`:
+
+```json
+{
+  "results": [
+    {"id": "m1", "memory": "User prefers Polish replies", "user_id": "demo-user"}
+  ]
+}
+```
+
 ## API endpoints
 
 Hermes mounts this plugin under:
@@ -134,7 +201,7 @@ Available API endpoints:
 
 ### GET `/status`
 
-Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, and holographic DB path.
+Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, holographic DB path, and Mem0 configuration status.
 
 Example:
 
@@ -170,9 +237,24 @@ Example:
 curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/holographic?limit=100&min_trust=0.3' | jq
 ```
 
+### GET `/mem0`
+
+Returns read-only memories from Mem0 API mode or fixture mode.
+
+Query parameters:
+
+- `limit`: 1-2000, default 500
+- `search`: optional search query; API mode uses Mem0 semantic search, fixture mode uses local substring search
+
+Example:
+
+```bash
+curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mem0?limit=100&search=dashboard' | jq
+```
+
 ### GET `/snapshot`
 
-Combined payload used by the UI. Accepts the same query parameters as `/holographic`.
+Combined payload used by the UI. Accepts the same query parameters as `/holographic`; `limit` and `search` are also applied to Mem0.
 
 ```bash
 curl http://127.0.0.1:9119/api/plugins/hermes-memory-ui/snapshot | jq
@@ -214,8 +296,8 @@ Plugin extensions to consider (**feel free to contribute!**):
 2. Adapter abstraction
    - `BuiltinAdapter`
    - `HolographicAdapter`
+   - `Mem0Adapter`
    - future `HonchoAdapter`
-   - future `Mem0Adapter`
    - future `HindsightAdapter`
 
 3. Diff and hygiene tools
@@ -295,8 +377,9 @@ The plugin script is loading before or outside the Hermes dashboard plugin runti
 
 - Read-only only.
 - Holographic search uses simple SQL `LIKE`, not FTS5 query syntax yet.
-- Only local SQLite holographic memory is supported.
-- Honcho/Mem0/Hindsight and other memory providers are not implemented.
+- Mem0 API mode depends on the `mem0ai` package being installed in the dashboard environment and a configured Mem0 API key.
+- Local `mem0.Memory` stores are not supported; this plugin mirrors Hermes' current cloud/API-oriented Mem0 provider.
+- Honcho/Hindsight and other memory providers are not implemented.
 - No pagination yet; use `limit` filter.
 
 ## License
