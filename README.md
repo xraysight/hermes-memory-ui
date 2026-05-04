@@ -14,6 +14,9 @@ Current scope:
   * Mem0 memory:
     + read-only Mem0 Platform memories via Hermes' `mem0` provider config
     + memories, user/agent scope, scores returned by search, timestamps, metadata
+  * Honcho memory:
+    + read-only Honcho workspace, host, peer, and provider configuration state
+    + user/AI peer cards, representations, conclusions, and context search
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
 
@@ -30,6 +33,10 @@ Holographic memory view:
 Mem0 memory view:
 
 ![Hermes Memory UI Mem0 memory view](docs/assets/hermes-memory-dashboard3.png)
+
+Honcho memory view:
+
+![Hermes Memory UI Honcho memory view](docs/assets/hermes-memory-dashboard4.png)
 
 ## Requirements
 
@@ -90,6 +97,7 @@ Top summary:
 - snapshot generation time
 - holographic total fact count only when `memory.provider` is currently `holographic`
 - Mem0 memory count only when `memory.provider` is currently `mem0`
+- Honcho peer-card fact count only when `memory.provider` is currently `honcho`
 
 Built-in memory section:
 
@@ -116,6 +124,16 @@ Mem0 memory section, displayed when `memory.provider` is currently `mem0`:
 - whether an API key is present and configured `user_id` and `agent_id`
 - memories returned by `get_all()` or `search()` after clicking `Apply / refresh` button
 - memory cards with score, user/agent scope, content, timestamps, and metadata
+
+Honcho memory section, displayed when `memory.provider` is currently `honcho`:
+
+- whether Honcho is the active provider
+- resolved host, workspace, user peer, AI peer, recall mode, and session strategy
+- whether an API key or self-hosted/base URL is configured, without exposing secrets
+- user and AI peer cards
+- user and AI representations
+- conclusions returned for user and AI peers
+- context search after clicking `Apply / refresh` button
 
 ## Holographic DB path resolution
 
@@ -173,6 +191,27 @@ The plugin performs read-only calls:
 - `client.get_all(filters={"user_id": ...})` when no search query is provided
 - `client.search(query=..., filters={"user_id": ...}, rerank=..., top_k=...)` when search is provided
 
+## Honcho configuration
+
+Honcho support follows Hermes' bundled `honcho` memory provider convention and reuses Hermes' provider helpers for config resolution and client creation. Supported config locations are resolved by Hermes, including:
+
+- `$HERMES_HOME/honcho.json`
+- `~/.hermes/honcho.json`
+- `~/.honcho/config.json`
+- environment variables such as `HONCHO_API_KEY`, `HONCHO_BASE_URL`, and `HONCHO_ENVIRONMENT`
+
+Honcho is a workspace/peer/session memory system rather than a flat memory list. The dashboard therefore shows peer cards, representations, conclusions, and context search rather than claiming a complete list of all memories. The API key is only used server-side through Hermes' Honcho provider helpers; it is never returned in plugin responses.
+
+The plugin performs read-only calls such as:
+
+- `HonchoClientConfig.from_global_config()` and `get_honcho_client(...)`
+- `client.peer(...)` for user and AI peers
+- `peer.context(target=..., search_query=..., search_top_k=...)`
+- `peer.representation(...)` or peer card fallbacks when needed
+- `peer.conclusions_of(target).list(...)`
+
+It does not call Honcho dialectic reasoning (`peer.chat()` / `honcho_reasoning`) automatically from page load or `/snapshot`.
+
 ## API endpoints
 
 Hermes mounts this plugin under:
@@ -185,7 +224,7 @@ Available API endpoints:
 
 ### GET `/status`
 
-Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, holographic DB path, and Mem0 configuration status.
+Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, holographic DB path, Mem0 configuration status, and Honcho configuration status.
 
 Example:
 
@@ -236,9 +275,24 @@ Example:
 curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mem0?limit=100&search=dashboard' | jq
 ```
 
+### GET `/honcho`
+
+Returns read-only Honcho provider state, user/AI peer cards, representations, conclusions, and optional context search.
+
+Query parameters:
+
+- `limit`: 1-100, default 50
+- `search`: optional context search query
+
+Example:
+
+```bash
+curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/honcho?limit=25&search=dashboard' | jq
+```
+
 ### GET `/snapshot`
 
-Combined payload used by the UI. Accepts the same query parameters as `/holographic`; `limit` and `search` are also applied to Mem0.
+Combined payload used by the UI. Accepts the same query parameters as `/holographic`; `limit` and `search` are also applied to Mem0 and Honcho, with Honcho internally capped at 100.
 
 ```bash
 curl http://127.0.0.1:9119/api/plugins/hermes-memory-ui/snapshot | jq
@@ -281,7 +335,7 @@ Plugin extensions to consider (**feel free to contribute!**):
    - `BuiltinAdapter`
    - `HolographicAdapter`
    - `Mem0Adapter`
-   - future `HonchoAdapter`
+   - `HonchoAdapter`
    - future `HindsightAdapter`
 
 3. Diff and hygiene tools
@@ -363,7 +417,8 @@ The plugin script is loading before or outside the Hermes dashboard plugin runti
 - Holographic search uses simple SQL `LIKE`, not FTS5 query syntax yet.
 - Mem0 API mode depends on the `mem0ai` package being installed in the dashboard environment and a configured Mem0 API key.
 - Local `mem0.Memory` stores are not supported; this plugin mirrors Hermes' current cloud/API-oriented Mem0 provider.
-- Honcho/Hindsight and other memory providers are not implemented.
+- Honcho support depends on Hermes' bundled Honcho provider helpers and a configured Honcho API key or base URL.
+- Hindsight and other memory providers are not implemented.
 - No pagination yet; use `limit` filter.
 
 ## License

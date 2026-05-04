@@ -1,9 +1,9 @@
 {
   "name": "hermes-memory-ui",
   "label": "Memory",
-  "description": "Read-only Hermes dashboard plugin for built-in, holographic, and Mem0 memory.",
+  "description": "Read-only Hermes dashboard plugin for built-in, holographic, Mem0, and Honcho memory.",
   "icon": "Database",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "tab": {
     "path": "/memory",
     "position": "after:config"

@@ -1,5 +1,5 @@
 manifest_version: 1
 name: hermes-memory-ui
-version: 0.2.0
-description: "Read-only Hermes dashboard plugin for inspecting built-in, holographic, and Mem0 memory."
+version: 0.3.0
+description: "Read-only Hermes dashboard plugin for inspecting built-in, holographic, Mem0, and Honcho memory."
 homepage: "https://github.com/xraysight/hermes-memory-ui"

@@ -313,6 +313,150 @@
     );
   }
 
+
+  function HonchoConclusionRow(props) {
+    const conclusion = props.conclusion;
+    return e("div", { className: "memory-ui-fact" },
+      e("div", { className: "memory-ui-fact-top" },
+        e("div", { className: "memory-ui-fact-id" }, "#" + conclusion.id),
+        conclusion.session_id ? e(Badge, { variant: "outline" }, "session " + conclusion.session_id) : null
+      ),
+      e("div", { className: "memory-ui-fact-content" }, conclusion.content || ""),
+      e("div", { className: "memory-ui-muted" }, "Updated: ", fmtTime(conclusion.updated_at), " · Created: ", fmtTime(conclusion.created_at))
+    );
+  }
+
+  function HonchoSearchResultRow(props) {
+    const result = props.result;
+    return e("div", { className: "memory-ui-fact" },
+      e("div", { className: "memory-ui-fact-top" },
+        e(Badge, { variant: "outline" }, result.source || "match"),
+        result.peer_id ? e(Badge, { variant: "outline" }, "peer " + result.peer_id) : null,
+        result.id ? e("span", { className: "memory-ui-muted" }, "#" + result.id) : null
+      ),
+      e("div", { className: "memory-ui-fact-content" }, result.content || "")
+    );
+  }
+
+  function HonchoPeerCard(props) {
+    const title = props.title;
+    const peer = props.peer || {};
+    const card = peer.card || [];
+    const conclusions = peer.conclusions || [];
+    return e(Card, null,
+      e(CardHeader, { className: "memory-ui-card-header" },
+        e("div", null,
+          e(CardTitle, { className: "text-base" }, title),
+          e("div", { className: "memory-ui-muted" }, peer.peer_id || "—")
+        ),
+        e("div", { className: "memory-ui-badges" },
+          e(Badge, { variant: "outline" }, card.length + " card facts"),
+          e(Badge, { variant: "outline" }, conclusions.length + " conclusions")
+        )
+      ),
+      e(CardContent, null,
+        e("div", { className: "memory-ui-muted" }, "Peer card"),
+        card.length
+          ? e("div", { className: "memory-ui-entry-list" }, card.map(function (item, index) {
+              return e("div", { key: title + "-card-" + index, className: "memory-ui-entry" },
+                e("div", { className: "memory-ui-entry-index" }, "#" + (index + 1)),
+                e("div", { className: "memory-ui-entry-content" }, item)
+              );
+            }))
+          : e(EmptyState, null, "No peer card entries returned."),
+        e("div", { className: "memory-ui-muted", style: { marginTop: "0.85rem" } }, "Representation"),
+        peer.representation
+          ? e("div", { className: "memory-ui-fact-content memory-ui-path" }, peer.representation)
+          : e(EmptyState, null, "No representation returned."),
+        e("div", { className: "memory-ui-muted", style: { marginTop: "0.85rem" } }, "Conclusions"),
+        conclusions.length
+          ? e("div", { className: "memory-ui-fact-list" }, conclusions.map(function (conclusion) {
+              return e(HonchoConclusionRow, { key: conclusion.id, conclusion: conclusion });
+            }))
+          : e(EmptyState, null, "No conclusions returned.")
+      )
+    );
+  }
+
+  function HonchoSection(props) {
+    const data = props.honcho;
+    const filters = props.filters;
+    const setFilters = props.setFilters;
+    const refresh = props.refresh;
+    const loading = !!props.loading;
+    if (!data) return null;
+    const searchResults = data.search_results || [];
+
+    return e("div", { className: "memory-ui-section" },
+      e("div", { className: "memory-ui-section-header" },
+        e("div", null,
+          e("h2", null, "Honcho memory"),
+          e("p", null, "Read-only view of Honcho workspace, peers, cards, representations, conclusions, and context search.")
+        ),
+        e("div", { className: "memory-ui-badges" },
+          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { variant: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key"),
+          e(Badge, { variant: data.base_url_present ? "outline" : "secondary" }, data.base_url_present ? "base URL" : "cloud/default"),
+          e(Badge, { variant: "outline" }, data.recall_mode || "hybrid")
+        )
+      ),
+      e("div", { className: "memory-ui-grid-4" },
+        e(StatCard, { label: "Workspace", value: data.workspace || "—", hint: "Honcho workspace" }),
+        e(StatCard, { label: "Host", value: data.host || "—", hint: "Hermes host key" }),
+        e(StatCard, { label: "User peer", value: data.user_peer || "—", hint: "target peer" }),
+        e(StatCard, { label: "AI peer", value: data.ai_peer || "—", hint: "observer / assistant" })
+      ),
+      e(Card, null,
+        e(CardContent, { className: "memory-ui-controls memory-ui-controls-compact" },
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Search context"),
+            e(Input, {
+              value: filters.search,
+              placeholder: "search Honcho context...",
+              onChange: function (ev) { setFilters(Object.assign({}, filters, { search: ev.target.value })); }
+            })
+          ),
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Limit"),
+            e("select", {
+              className: "memory-ui-select",
+              value: filters.limit,
+              onChange: function (ev) { setFilters(Object.assign({}, filters, { limit: ev.target.value })); }
+            },
+              e("option", { value: "10" }, "10"),
+              e("option", { value: "25" }, "25"),
+              e("option", { value: "50" }, "50"),
+              e("option", { value: "100" }, "100")
+            )
+          ),
+          e(Button, { onClick: refresh, className: "memory-ui-refresh", disabled: loading }, loading ? "Refreshing..." : "Apply / refresh")
+        )
+      ),
+      data.search ? e(Card, null,
+        e(CardContent, null,
+          e("div", { className: "memory-ui-title-row" },
+            e("div", null,
+              e("div", { className: "memory-ui-muted" }, "Applied Honcho search"),
+              e("div", { className: "memory-ui-fact-content" }, data.search)
+            ),
+            e(Badge, { variant: "outline" }, (data.search_result_count || 0) + " text matches")
+          ),
+          searchResults.length
+            ? e("div", { className: "memory-ui-fact-list" }, searchResults.map(function (result, index) {
+                return e(HonchoSearchResultRow, { key: "honcho-search-" + index, result: result });
+              }))
+            : e(EmptyState, null, "No visible text matches in returned cards, representations, or conclusions. Honcho may still have used the query for context ranking.")
+        )
+      ) : null,
+      e(ErrorBox, { error: data.error }),
+      e("div", { className: "memory-ui-path" }, data.config_path),
+      e("div", { className: "memory-ui-grid-2" },
+        e(HonchoPeerCard, { title: "User peer", peer: data.user }),
+        e(HonchoPeerCard, { title: "AI peer", peer: data.ai })
+      )
+    );
+  }
+
   function MemoryPage() {
     const [snapshot, setSnapshot] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -342,9 +486,11 @@
     const builtin = snapshot && snapshot.builtin;
     const holographic = snapshot && snapshot.holographic;
     const mem0 = snapshot && snapshot.mem0;
+    const honcho = snapshot && snapshot.honcho;
     const showHolographic = !!(holographic && holographic.provider_configured);
     const showMem0 = !!(mem0 && mem0.provider_configured);
-    const heroGridClass = showHolographic || showMem0 ? "memory-ui-grid-4" : "memory-ui-grid-2";
+    const showHoncho = !!(honcho && honcho.provider_configured);
+    const heroGridClass = showHolographic || showMem0 || showHoncho ? "memory-ui-grid-4" : "memory-ui-grid-2";
 
     return e("div", { className: "memory-ui-page" },
       e(Card, { className: "memory-ui-hero" },
@@ -365,6 +511,7 @@
             e(StatCard, { label: "Built-in entries", value: builtin ? builtin.total_entries : 0, hint: "MEMORY.md + USER.md" }),
             showHolographic ? e(StatCard, { label: "Facts", value: holographic ? holographic.total_facts : 0, hint: "holographic facts" }) : null,
             showMem0 ? e(StatCard, { label: "Mem0", value: mem0 ? mem0.total_memories : 0, hint: "Mem0 memories" }) : null,
+            showHoncho ? e(StatCard, { label: "Honcho", value: honcho ? ((honcho.user.card || []).length + (honcho.ai.card || []).length) : 0, hint: "peer card facts" }) : null,
             e(StatCard, { label: "Hermes home", value: builtin ? "active" : "—", hint: builtin ? builtin.hermes_home : "loading" }),
             e(StatCard, { label: "Generated", value: snapshot.generated_at ? fmtTime(snapshot.generated_at) : "—", hint: "snapshot time" })
           ) : e(EmptyState, null, "Loading memory snapshot...")
@@ -379,6 +526,10 @@
         showMem0 ? e(React.Fragment, null,
           e(Separator, null),
           e(Mem0Section, { mem0: mem0, filters: filters, setFilters: setFilters, refresh: refresh })
+        ) : null,
+        showHoncho ? e(React.Fragment, null,
+          e(Separator, null),
+          e(HonchoSection, { honcho: honcho, filters: filters, setFilters: setFilters, refresh: refresh, loading: loading })
         ) : null
       ) : null
     );
