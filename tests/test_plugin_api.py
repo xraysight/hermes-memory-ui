@@ -326,6 +326,91 @@ def test_hindsight_config_status_hides_keys_and_reads_local_config(monkeypatch, 
     assert "llm-secret" not in dumped
 
 
+def test_hindsight_uses_daemon_url_for_split_host_without_managing_local_daemon(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded"}), encoding="utf-8")
+    monkeypatch.setenv("HINDSIGHT_DAEMON_URL", "http://192.168.42.20:8888")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    cfg = module._load_hindsight_config()
+
+    assert cfg["_api_url"] == "http://192.168.42.20:8888"
+    assert cfg["api_url"] == "http://192.168.42.20:8888"
+    assert module._hindsight_should_manage_local_daemon(cfg) is False
+    assert module._ensure_hindsight_local_daemon(cfg) is None
+
+
+def test_hindsight_endpoint_precedence_prefers_file_then_api_env_then_daemon_env(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded"}), encoding="utf-8")
+    monkeypatch.setenv("HINDSIGHT_DAEMON_URL", "http://192.168.42.20:8888")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    assert module._load_hindsight_config()["_api_url"] == "http://192.168.42.20:8888"
+
+    monkeypatch.setenv("HINDSIGHT_API_URL", "http://192.168.42.30:8888")
+    assert module._load_hindsight_config()["_api_url"] == "http://192.168.42.30:8888"
+
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "api_url": "http://192.168.42.40:8888"}), encoding="utf-8")
+    assert module._load_hindsight_config()["_api_url"] == "http://192.168.42.40:8888"
+
+
+def test_hindsight_local_daemon_uses_resolved_binary_when_path_is_constrained(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "profile": "test-profile"}), encoding="utf-8")
+    fake_bin = tmp_path / "venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    fake_executable = fake_bin / "python"
+    fake_executable.write_text("", encoding="utf-8")
+    fake_hindsight_embed = fake_bin / "hindsight-embed"
+    fake_hindsight_embed.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_hindsight_embed.chmod(0o755)
+    calls = []
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.sys, "executable", str(fake_executable))
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    cfg = module._load_hindsight_config()
+
+    assert module._ensure_hindsight_local_daemon(cfg) is None
+    assert calls[0][0] == [str(fake_hindsight_embed), "-p", "test-profile", "daemon", "start"]
+
+
+def test_hindsight_local_daemon_reports_safe_diagnostics_when_binary_missing(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded"}), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    missing_python = tmp_path / "missing" / "python"
+    missing_binary = tmp_path / "missing" / "hindsight-embed"
+    monkeypatch.setattr(module.sys, "executable", str(missing_python))
+    monkeypatch.setattr(module, "_hindsight_embed_candidates", lambda: [missing_binary])
+    cfg = module._load_hindsight_config()
+
+    error = module._ensure_hindsight_local_daemon(cfg)
+
+    assert "hindsight-embed command not found" in error
+    assert "checked_paths" in error
+    assert str(missing_binary) in error
+    assert "api_key" not in error.lower()
+    assert "secret" not in error.lower()
+
+
 def test_hindsight_api_url_is_redacted_in_public_payloads(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
     cfg_path = tmp_path / "hindsight" / "config.json"

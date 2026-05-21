@@ -292,7 +292,17 @@ Hindsight support follows Hermes' bundled `hindsight` memory provider convention
 
 - `$HERMES_HOME/hindsight/config.json`
 - legacy `~/.hindsight/config.json`
-- environment variables such as `HINDSIGHT_MODE`, `HINDSIGHT_API_URL`, `HINDSIGHT_BANK_ID`, and `HINDSIGHT_BUDGET`
+- environment variables such as `HINDSIGHT_MODE`, `HINDSIGHT_API_URL`, `HINDSIGHT_DAEMON_URL`, `HINDSIGHT_BANK_ID`, and `HINDSIGHT_BUDGET`
+
+The daemon/API endpoint is resolved with this precedence:
+
+```text
+hindsight/config.json api_url > HINDSIGHT_API_URL > HINDSIGHT_DAEMON_URL > default
+```
+
+For `local_embedded`, the default endpoint is `http://localhost:8888`. If the resolved endpoint is remote, for example `HINDSIGHT_DAEMON_URL=http://192.168.42.20:8888`, the dashboard treats that daemon as authoritative and does not try to start `hindsight-embed daemon start` on the dashboard host. Local daemon startup is attempted only for `localhost`, `127.0.0.1`, or `::1` endpoints.
+
+When local daemon startup is needed, the plugin resolves `hindsight-embed` from `PATH`, the current Python environment, Hermes' bundled venv under `$HERMES_HOME/hermes-agent/venv/bin`, the default `~/.hermes/hermes-agent/venv/bin`, or `~/.local/bin`. If the binary cannot be found, the error includes safe diagnostics for `PATH`, `sys.executable`, and checked paths.
 
 Secrets such as `HINDSIGHT_API_KEY` and `HINDSIGHT_LLM_API_KEY` are only detected as boolean `*_present` flags and are never returned in plugin responses. Hindsight is query-oriented rather than a complete list API, so the dashboard only calls recall/reflect after the user clicks a button. `/snapshot` and page load include status/config only.
 
