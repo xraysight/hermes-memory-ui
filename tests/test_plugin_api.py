@@ -688,7 +688,8 @@ def test_byterover_payload_uses_brv_status_locations_and_search(monkeypatch, tmp
     assert payload["results"][0]["score"] == 0.91
     calls = [json.loads(line)["argv"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert ["locations", "--format", "json"] in calls
-    assert ["status", "--format", "json", "--project-root", str(project)] in calls
+    assert ["status", "--format", "json"] in calls
+    assert not any(call[:1] == ["status"] and "--project-root" in call for call in calls)
     assert ["search", "dashboard", "--format", "json", "--limit", "3", "--scope", "docs/"] in calls
 
 
@@ -716,6 +717,72 @@ def test_byterover_query_is_explicit_and_status_includes_provider(monkeypatch, t
     calls = [json.loads(line)["argv"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert ["query", "What is memory UI?", "--format", "json"] in calls
 
+
+
+def test_byterover_query_parses_json_lines_completed_event(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    script = tmp_path / "fake-brv-jsonl"
+    log_path = tmp_path / "brv-jsonl-calls.jsonl"
+    script.write_text(
+        """#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+log = Path(os.environ.get('FAKE_BRV_LOG', ''))
+if log:
+    with log.open('a', encoding='utf-8') as fh:
+        fh.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')
+cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+if cmd == 'locations':
+    print(json.dumps({'success': True, 'command': 'locations', 'data': {'locations': []}}))
+elif cmd == 'status':
+    print(json.dumps({'success': True, 'command': 'status', 'data': {'projectPath': os.getcwd(), 'isInitialized': True}}))
+elif cmd == 'query':
+    query = sys.argv[2]
+    print(json.dumps({'event': 'thinking', 'message': 'working'}))
+    print(json.dumps({'event': 'response', 'delta': 'partial'}))
+    print(json.dumps({'event': 'completed', 'result': 'JSONL answer about ' + query, 'matchedDocs': [{'path': 'docs/jsonl.md'}], 'taskId': 'jsonl-task', 'topScore': 0.77}))
+else:
+    print(json.dumps({'success': True, 'data': {}}))
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("FAKE_BRV_LOG", str(log_path))
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: byterover\n", encoding="utf-8")
+    (tmp_path / "byterover.json").write_text(json.dumps({"brv_path": str(script), "project_root": str(project)}), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._byterover_query_payload("How does JSONL work?")
+
+    assert payload["error"] is None
+    assert payload["answer"] == "JSONL answer about How does JSONL work?"
+    assert payload["answer_summary"] == "JSONL answer about How does JSONL work?"
+    assert payload["matched_docs"] == [{"path": "docs/jsonl.md"}]
+    assert payload["task_id"] == "jsonl-task"
+    assert payload["top_score"] == 0.77
+
+
+def test_byterover_context_tree_excerpt_rejects_sibling_prefix_paths(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    context_root = project / ".brv" / "context-tree"
+    sibling_root = project / ".brv" / "context-tree2"
+    context_root.mkdir(parents=True)
+    sibling_root.mkdir(parents=True)
+    secret_file = sibling_root / "secret.md"
+    secret_file.write_text("SECRET outside context tree", encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    result = module._normalize_byterover_result(
+        {"path": "../context-tree2/secret.md", "excerpt": "safe fallback excerpt"},
+        0,
+        "secret",
+        str(project),
+    )
+
+    dumped = json.dumps(result)
+    assert "SECRET outside context tree" not in dumped
+    assert result["excerpt"] == "safe fallback excerpt"
 
 
 def test_byterover_search_requires_project_root_to_avoid_creating_context(monkeypatch, tmp_path):
