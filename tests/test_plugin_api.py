@@ -83,6 +83,36 @@ def test_mem0_search_uses_search_endpoint(monkeypatch, tmp_path):
     assert calls == [("init", "secret-token"), ("search", "dashboard", {"user_id": "u1"}, True, 7)]
 
 
+def test_provider_error_messages_are_redacted(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
+    (tmp_path / "mem0.json").write_text(json.dumps({"user_id": "u1"}), encoding="utf-8")
+    monkeypatch.setenv("MEM0_API_KEY", "secret-token")
+
+    class FakeMemoryClient:
+        def __init__(self, api_key):
+            pass
+
+        def get_all(self, filters):
+            raise RuntimeError(
+                "request failed: Bearer secret-token "
+                "https://user:pass@example.test/v1?api_key=secret-token&token=abc123"
+            )
+
+    fake_mem0 = types.ModuleType("mem0")
+    fake_mem0.MemoryClient = FakeMemoryClient
+    monkeypatch.setitem(sys.modules, "mem0", fake_mem0)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._mem0_payload(limit=5)
+
+    assert payload["error"]
+    dumped = json.dumps(payload)
+    assert "secret-token" not in dumped
+    assert "user:pass" not in dumped
+    assert "abc123" not in dumped
+    assert "[REDACTED]" in payload["error"]
+
+
 def install_fake_honcho_client(monkeypatch, tmp_path, calls):
     fake_plugins = types.ModuleType("plugins")
     fake_memory = types.ModuleType("plugins.memory")
@@ -296,6 +326,28 @@ def test_hindsight_config_status_hides_keys_and_reads_local_config(monkeypatch, 
     assert "llm-secret" not in dumped
 
 
+def test_hindsight_api_url_is_redacted_in_public_payloads(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({
+        "mode": "cloud",
+        "api_url": "https://user:pass@example.test/v1?api_key=url-secret&token=tok-secret&debug=true",
+        "apiKey": "hindsight-secret",
+        "bank_id": "dashboard-bank",
+    }), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._hindsight_payload(mode="status")
+
+    assert payload["api_url"] == "https://[REDACTED]@example.test/v1?api_key=[REDACTED]&token=[REDACTED]&debug=true"
+    dumped = json.dumps(payload)
+    assert "user:pass" not in dumped
+    assert "url-secret" not in dumped
+    assert "tok-secret" not in dumped
+    assert "hindsight-secret" not in dumped
+
+
 def test_hindsight_recall_and_reflect_use_provider_without_retain(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
     cfg_path = tmp_path / "hindsight" / "config.json"
@@ -428,7 +480,6 @@ def test_hindsight_recall_does_not_fall_back_to_documents(monkeypatch, tmp_path)
     assert payload["result_count"] == 0
     assert payload["results"] == []
     assert "secret" not in json.dumps(payload)
-
 
 def create_mnemosyne_db(tmp_path):
     db_dir = tmp_path / "mnemosyne" / "data"
@@ -579,3 +630,109 @@ def test_mnemosyne_snapshot_and_status_include_provider(monkeypatch, tmp_path):
     assert snapshot["mnemosyne"]["memory_count"] == 1
     assert status["mnemosyne"]["provider_configured"] is True
     assert status["mnemosyne"]["db_exists"] is True
+
+def write_fake_brv(tmp_path):
+    script = tmp_path / "fake-brv"
+    log_path = tmp_path / "brv-calls.jsonl"
+    script.write_text(
+        """#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+log = Path(os.environ.get('FAKE_BRV_LOG', ''))
+if log:
+    with log.open('a', encoding='utf-8') as fh:
+        fh.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')
+cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+if cmd == 'locations':
+    print(json.dumps({'success': True, 'command': 'locations', 'data': {'locations': [{'projectPath': '/workspace/demo', 'contextTreePath': '/workspace/demo/.brv/context-tree', 'isInitialized': True}]}}))
+elif cmd == 'status':
+    project = ''
+    if '--project-root' in sys.argv:
+        project = sys.argv[sys.argv.index('--project-root') + 1]
+    print(json.dumps({'success': True, 'command': 'status', 'data': {'projectPath': project or os.getcwd(), 'isInitialized': True, 'contextTreePath': (project or os.getcwd()) + '/.brv/context-tree'}}))
+elif cmd == 'search':
+    query = sys.argv[2]
+    print(json.dumps({'success': True, 'command': 'search', 'data': {'status': 'completed', 'totalFound': 1, 'results': [{'path': 'docs/memory.md', 'score': 0.91, 'excerpt': 'Hermes Memory UI supports ByteRover search for ' + query}]}}))
+elif cmd == 'query':
+    query = sys.argv[2]
+    print(json.dumps({'success': True, 'command': 'query', 'data': {'status': 'completed', 'result': 'Answer about ' + query, 'matchedDocs': [{'path': 'docs/memory.md'}], 'taskId': 'task-1', 'topScore': 0.88}}))
+else:
+    print(json.dumps({'success': False, 'data': {'error': 'unknown command ' + cmd}}))
+    sys.exit(1)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script, log_path
+
+
+def test_byterover_payload_uses_brv_status_locations_and_search(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    brv, log_path = write_fake_brv(tmp_path)
+    monkeypatch.setenv("FAKE_BRV_LOG", str(log_path))
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: byterover\n", encoding="utf-8")
+    (tmp_path / "byterover.json").write_text(json.dumps({"brv_path": str(brv), "project_root": str(project), "search_scope": "docs/"}), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._byterover_payload(limit=3, search="dashboard")
+
+    assert payload["provider_configured"] is True
+    assert payload["brv_available"] is True
+    assert payload["project_root"] == str(project)
+    assert payload["location_count"] == 1
+    assert payload["status"]["projectPath"] == str(project)
+    assert payload["result_count"] == 1
+    assert payload["total_found"] == 1
+    assert payload["results"][0]["path"] == "docs/memory.md"
+    assert payload["results"][0]["score"] == 0.91
+    calls = [json.loads(line)["argv"] for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert ["locations", "--format", "json"] in calls
+    assert ["status", "--format", "json", "--project-root", str(project)] in calls
+    assert ["search", "dashboard", "--format", "json", "--limit", "3", "--scope", "docs/"] in calls
+
+
+def test_byterover_query_is_explicit_and_status_includes_provider(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    brv, log_path = write_fake_brv(tmp_path)
+    monkeypatch.setenv("FAKE_BRV_LOG", str(log_path))
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: byterover\n", encoding="utf-8")
+    (tmp_path / "byterover.json").write_text(json.dumps({"brv_path": str(brv), "project_root": str(project)}), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    import asyncio
+
+    snapshot = asyncio.run(module.snapshot(limit=5))
+    status = asyncio.run(module.status())
+    query = module._byterover_query_payload("What is memory UI?")
+
+    assert snapshot["byterover"]["provider_configured"] is True
+    assert snapshot["byterover"]["results"] == []
+    assert status["byterover"]["provider_configured"] is True
+    assert status["byterover"]["brv_available"] is True
+    assert query["answer"] == "Answer about What is memory UI?"
+    assert query["matched_docs"] == [{"path": "docs/memory.md"}]
+    calls = [json.loads(line)["argv"] for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert ["query", "What is memory UI?", "--format", "json"] in calls
+
+
+
+def test_byterover_search_requires_project_root_to_avoid_creating_context(monkeypatch, tmp_path):
+    brv, log_path = write_fake_brv(tmp_path)
+    monkeypatch.setenv("FAKE_BRV_LOG", str(log_path))
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: byterover\n", encoding="utf-8")
+    (tmp_path / "byterover.json").write_text(json.dumps({"brv_path": str(brv)}), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._byterover_payload(limit=3, search="dashboard")
+    query = module._byterover_query_payload("What is memory UI?")
+
+    assert payload["provider_configured"] is True
+    assert payload["locations"]
+    assert payload["results"] == []
+    assert "project_root is not configured" in payload["error"]
+    assert "project_root is not configured" in query["error"]
+    calls = [json.loads(line)["argv"] for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert ["locations", "--format", "json"] in calls
+    assert not any(call and call[0] in {"search", "query", "status"} for call in calls)

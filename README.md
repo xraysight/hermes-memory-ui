@@ -24,6 +24,9 @@ Current scope:
     + read-only/query-only Hindsight provider configuration state
     + explicit recall and reflect actions; no automatic retain/write flow
     + contents view via the official Hindsight client for memory units and retained source documents
+  * ByteRover memory:
+    + read-only ByteRover CLI (`brv`) project status and registered locations
+    + explicit BM25 search and optional query/synthesis action; no curate/write flow
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
 
@@ -48,6 +51,14 @@ Honcho memory view:
 Hindsight memory view:
 
 ![Hermes Memory UI Hindsight memory view](docs/assets/hermes-memory-dashboard5.png)
+
+Mnemosyne memory view:
+
+![Hermes Memory UI Mnemosyne memory view](docs/assets/hermes-memory-dashboard7.png)
+
+Byterover memory view:
+
+![Hermes Memory UI Byterover memory view](docs/assets/hermes-memory-dashboard6.png)
 
 ## Requirements
 
@@ -111,6 +122,7 @@ Top summary:
 - Honcho peer-card fact count only when `memory.provider` is currently `honcho`
 - Mnemosyne episode count only when `memory.provider` is currently `mnemosyne`
 - Hindsight bank/status only when `memory.provider` is currently `hindsight`
+- ByteRover registered location count only when `memory.provider` is currently `byterover`
 
 Built-in memory section:
 
@@ -167,6 +179,16 @@ Hindsight memory section, displayed when `memory.provider` is currently `hindsig
 - explicit `Reflect` query button for synthesis over memories
 - automatically displayed Hindsight contents with a `Refresh` button for extracted memory units plus retained source documents
 - no retain/write endpoint
+
+ByteRover memory section, displayed when `memory.provider` is currently `byterover`:
+
+- whether ByteRover is the active provider
+- whether the `brv` CLI is available
+- configured project root and optional search scope
+- registered ByteRover locations
+- explicit BM25 `Search / refresh` action through `brv search --format json`
+- explicit `Run query` action through `brv query --format json`
+- no `curate`, `review approve`, version-control, sync, or write endpoints
 
 ## Holographic DB path resolution
 
@@ -287,6 +309,37 @@ Recall and reflect show only native Hindsight results. Retained source documents
 
 It does not expose `hindsight_retain` or any write UI.
 
+## ByteRover configuration
+
+ByteRover support uses the local `brv` CLI. The plugin reads non-secret configuration from `$HERMES_HOME/byterover.json`, from `plugins.hermes-memory-ui.byterover` in Hermes config, or from environment variables.
+
+Example `$HERMES_HOME/byterover.json`:
+
+```json
+{
+  "brv_path": "brv",
+  "project_root": "/path/to/project",
+  "search_scope": "docs/",
+  "query_timeout": 60
+}
+```
+
+Environment values:
+
+- `BRV_PATH`
+- `BYTEROVER_PROJECT_ROOT`
+- `BYTEROVER_SEARCH_SCOPE`
+- `BYTEROVER_QUERY_TIMEOUT`
+
+The plugin performs read-only/query-only CLI calls:
+
+- `brv locations --format json`
+- `brv status --format json [--project-root ...]`
+- `brv search QUERY --format json --limit N [--scope ...]`
+- `brv query QUERY --format json --timeout N` only after the user clicks `Run query`
+
+It does not expose `brv curate`, `brv review approve`, version-control, push/pull, sync, or other mutation commands.
+
 ## API endpoints
 
 Hermes mounts this plugin under:
@@ -299,7 +352,7 @@ Available API endpoints:
 
 ### GET `/status`
 
-Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, holographic DB path, Mem0 configuration status, Honcho configuration status, Mnemosyne configuration status, and Hindsight configuration status.
+Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, holographic DB path, Mem0 configuration status, Honcho configuration status, Mnemosyne configuration status, Hindsight configuration status, and ByteRover CLI/configuration status.
 
 Example:
 
@@ -408,6 +461,36 @@ Query parameters:
 curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mnemosyne/prefetch?query=dashboard' | jq
 ```
 
+### GET `/byterover`
+
+Returns read-only ByteRover CLI status, registered locations, and optional BM25 search results.
+
+Query parameters:
+
+- `limit`: 1-50, default 10
+- `search`: optional search query; uses `brv search --format json`
+
+Example:
+
+```bash
+curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/byterover?limit=10&search=dashboard' | jq
+```
+
+### GET `/byterover/query`
+
+Runs explicit ByteRover query/synthesis. This may invoke ByteRover's configured model; it is never called automatically on page load.
+
+Query parameters:
+
+- `query`: required question string
+- `timeout`: 1-300 seconds, default 60
+
+Example:
+
+```bash
+curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/byterover/query?query=dashboard&timeout=60' | jq
+```
+
 ### GET `/hindsight`
 
 Returns Hindsight provider status/config only. It does not run recall or reflect.
@@ -456,7 +539,7 @@ curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/hindsight/reflect?query
 
 ### GET `/snapshot`
 
-Combined payload used by the UI. Accepts the same query parameters as `/holographic`; `limit` and `search` are also applied to Mem0, Honcho, and Mnemosyne, with Honcho and Mnemosyne internally capped at 100. Hindsight in `/snapshot` is status/config only and does not query recall/reflect.
+Combined payload used by the UI. Accepts the same query parameters as `/holographic`; `limit` and `search` are also applied to Mem0, Honcho, Mnemosyne, and ByteRover, with Honcho and Mnemosyne internally capped at 100 and ByteRover capped at 50. Hindsight in `/snapshot` is status/config only and does not query recall/reflect.
 
 ```bash
 curl http://127.0.0.1:9119/api/plugins/hermes-memory-ui/snapshot | jq
@@ -502,6 +585,8 @@ Plugin extensions to consider (**feel free to contribute!**):
    - `Mem0Adapter`
    - `HonchoAdapter`
    - `HindsightAdapter`
+   - `MnemosyneAdapter`
+   - `ByteroverAdapter`
 
 3. Diff and hygiene tools
    - find duplicates
@@ -584,6 +669,7 @@ The plugin script is loading before or outside the Hermes dashboard plugin runti
 - Local `mem0.Memory` stores are not supported; this plugin mirrors Hermes' current cloud/API-oriented Mem0 provider.
 - Honcho support depends on Hermes' bundled Honcho provider helpers and a configured Honcho API key or base URL.
 - Hindsight support depends on Hermes' bundled Hindsight provider helpers and a configured Hindsight Cloud/local setup.
+- ByteRover support depends on the `brv` CLI being available in the dashboard environment and, for project-specific status/search, a configured or auto-detected ByteRover project.
 - No pagination yet; use `limit` filter.
 
 ## License

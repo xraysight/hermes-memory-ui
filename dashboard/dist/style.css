@@ -42,10 +42,15 @@
   gap: 0.4rem;
 }
 
+.memory-ui-grid-1,
 .memory-ui-grid-2,
 .memory-ui-grid-4 {
   display: grid;
   gap: calc(0.8rem * var(--spacing-mul, 1));
+}
+
+.memory-ui-grid-1 {
+  grid-template-columns: 1fr;
 }
 
 .memory-ui-grid-2 {
