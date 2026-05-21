@@ -458,6 +458,131 @@
   }
 
 
+  function ByteRoverResultRow(props) {
+    const result = props.result;
+    const metadata = result.metadata && Object.keys(result.metadata).length ? JSON.stringify(result.metadata) : "";
+    return e("div", { className: "memory-ui-fact" },
+      e("div", { className: "memory-ui-fact-top" },
+        e("div", { className: "memory-ui-fact-id" }, "#" + result.id),
+        result.score !== null && result.score !== undefined ? e(Badge, { variant: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
+        result.path ? e(Badge, { variant: "outline" }, result.path) : null
+      ),
+      result.title ? e("div", { className: "memory-ui-muted" }, result.title) : null,
+      e("div", { className: "memory-ui-fact-content" }, result.excerpt || ""),
+      result.raw_excerpt ? e("details", { className: "memory-ui-path" },
+        e("summary", null, "Full search excerpt"),
+        e("div", { className: "memory-ui-fact-content memory-ui-path" }, result.raw_excerpt)
+      ) : null,
+      metadata && metadata !== "{}" ? e("div", { className: "memory-ui-tags" }, "metadata: ", metadata) : null
+    );
+  }
+
+  function ByteRoverSection(props) {
+    const data = props.byterover;
+    const filters = props.filters;
+    const setFilters = props.setFilters;
+    const refresh = props.refresh;
+    const loading = !!props.loading;
+    const [query, setQuery] = useState("");
+    const [queryData, setQueryData] = useState(null);
+    const [queryLoading, setQueryLoading] = useState(false);
+    const [queryError, setQueryError] = useState(null);
+    if (!data) return null;
+
+    function runQuery() {
+      if (!query.trim()) {
+        setQueryError("Enter a question first.");
+        return;
+      }
+      const p = new URLSearchParams();
+      p.set("query", query);
+      setQueryLoading(true);
+      setQueryError(null);
+      SDK.fetchJSON("/api/plugins/hermes-memory-ui/byterover/query?" + p.toString())
+        .then(function (payload) { setQueryData(payload); })
+        .catch(function (err) { setQueryError(err && err.message ? err.message : String(err)); })
+        .finally(function () { setQueryLoading(false); });
+    }
+
+    const results = data.results || [];
+    const status = data.status || {};
+    return e("div", { className: "memory-ui-section" },
+      e("div", { className: "memory-ui-section-header" },
+        e("div", null,
+          e("h2", null, "ByteRover memory"),
+          e("p", null, "Read-only ByteRover memory search and explicit query results via brv CLI.")
+        ),
+        e("div", { className: "memory-ui-badges" },
+          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { variant: data.brv_available ? "outline" : "secondary" }, data.brv_available ? "brv found" : "brv missing"),
+          e(Badge, { variant: data.project_exists ? "outline" : "secondary" }, data.project_exists ? "project set" : "auto project")
+        )
+      ),
+      e("div", { className: "memory-ui-grid-1" },
+        e(StatCard, { label: "Project", value: data.project_root || "auto", hint: data.project_root ? "configured project root" : "auto-detected project root" })
+      ),
+      e(Card, null,
+        e(CardContent, { className: "memory-ui-controls memory-ui-controls-compact" },
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Search"),
+            e(Input, {
+              value: filters.search,
+              placeholder: "BM25 search in ByteRover context tree...",
+              onChange: function (ev) { setFilters(Object.assign({}, filters, { search: ev.target.value })); }
+            })
+          ),
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Limit"),
+            e("select", {
+              className: "memory-ui-select",
+              value: filters.limit,
+              onChange: function (ev) { setFilters(Object.assign({}, filters, { limit: ev.target.value })); }
+            },
+              e("option", { value: "10" }, "10"),
+              e("option", { value: "25" }, "25"),
+              e("option", { value: "50" }, "50")
+            )
+          ),
+          e(Button, { onClick: refresh, className: "memory-ui-refresh", disabled: loading }, loading ? "Refreshing..." : "Search / refresh")
+        )
+      ),
+      data.search ? e("div", { className: "memory-ui-fact-list" },
+        e("div", { className: "memory-ui-muted" }, "Search: ", data.search, " · total found: ", data.total_found || 0),
+        results.length
+          ? results.map(function (result, index) { return e(ByteRoverResultRow, { key: "byterover-" + index, result: result }); })
+          : e(EmptyState, null, data.error ? "ByteRover search is unavailable." : "No ByteRover results returned.")
+      ) : e(EmptyState, null, "Enter a search term and click Search / refresh to query ByteRover's context tree."),
+      e(Card, null,
+        e(CardContent, { className: "memory-ui-controls memory-ui-controls-compact" },
+          e("div", { className: "memory-ui-control" },
+            e("label", null, "Query"),
+            e(Input, {
+              value: query,
+              placeholder: "ask ByteRover to synthesize an answer...",
+              onChange: function (ev) { setQuery(ev.target.value); }
+            })
+          ),
+          e(Button, { onClick: runQuery, className: "memory-ui-refresh", disabled: queryLoading }, queryLoading ? "Running..." : "Run query")
+        )
+      ),
+      e(ErrorBox, { error: data.error || queryError || (queryData && queryData.error) }),
+      queryData ? e(Card, null,
+        e(CardContent, null,
+          e("div", { className: "memory-ui-muted" }, "ByteRover query", queryData.task_id ? " · " + queryData.task_id : ""),
+          queryData.answer_summary
+            ? e("div", { className: "memory-ui-fact-content" }, queryData.answer_summary)
+            : (queryData.answer ? e("div", { className: "memory-ui-fact-content memory-ui-path" }, queryData.answer) : e(EmptyState, null, "No query answer returned.")),
+          queryData.answer && queryData.answer_summary && queryData.answer !== queryData.answer_summary ? e("details", { className: "memory-ui-path" },
+            e("summary", null, "Raw ByteRover output"),
+            e("div", { className: "memory-ui-fact-content memory-ui-path" }, queryData.answer)
+          ) : null,
+          queryData.matched_docs && queryData.matched_docs.length ? e("div", { className: "memory-ui-tags" }, "matched docs: ", JSON.stringify(queryData.matched_docs)) : null
+        )
+      ) : null
+    );
+  }
+
+
   function HindsightResultRow(props) {
     const result = props.result;
     const metadata = result.metadata && Object.keys(result.metadata).length ? JSON.stringify(result.metadata) : "";
@@ -782,12 +907,14 @@
     const honcho = snapshot && snapshot.honcho;
     const mnemosyne = snapshot && snapshot.mnemosyne;
     const hindsight = snapshot && snapshot.hindsight;
+    const byterover = snapshot && snapshot.byterover;
     const showHolographic = !!(holographic && holographic.provider_configured);
     const showMem0 = !!(mem0 && mem0.provider_configured);
     const showHoncho = !!(honcho && honcho.provider_configured);
     const showMnemosyne = !!(mnemosyne && mnemosyne.provider_configured);
     const showHindsight = !!(hindsight && hindsight.provider_configured);
-    const heroGridClass = showHolographic || showMem0 || showHoncho || showMnemosyne || showHindsight ? "memory-ui-grid-4" : "memory-ui-grid-2";
+    const showByteRover = !!(byterover && byterover.provider_configured);
+    const heroGridClass = showHolographic || showMem0 || showHoncho || showMnemosyne || showHindsight || showByteRover ? "memory-ui-grid-4" : "memory-ui-grid-2";
 
     return e("div", { className: "memory-ui-page" },
       e(Card, { className: "memory-ui-hero" },
@@ -810,6 +937,7 @@
             showMem0 ? e(StatCard, { label: "Mem0", value: mem0 ? mem0.total_memories : 0, hint: "Mem0 memories" }) : null,
             showHoncho ? e(StatCard, { label: "Honcho", value: honcho ? ((honcho.user.card || []).length + (honcho.ai.card || []).length) : 0, hint: "peer card facts" }) : null,
             showMnemosyne ? e(StatCard, { label: "Mnemosyne", value: mnemosyne ? (mnemosyne.total_memories || 0) : 0, hint: "local episodes" }) : null,
+            showByteRover ? e(StatCard, { label: "ByteRover", value: byterover && byterover.project_exists ? "active" : "configured", hint: "search/query memory" }) : null,
             showHindsight ? e(StatCard, { label: "Hindsight", value: hindsight ? (hindsight.bank_id || "active") : "—", hint: "query-only memory" }) : null,
             e(StatCard, { label: "Hermes home", value: builtin ? "active" : "—", hint: builtin ? builtin.hermes_home : "loading" }),
             e(StatCard, { label: "Generated", value: snapshot.generated_at ? fmtTime(snapshot.generated_at) : "—", hint: "snapshot time" })
@@ -833,6 +961,10 @@
         showMnemosyne ? e(React.Fragment, null,
           e(Separator, null),
           e(MnemosyneSection, { mnemosyne: mnemosyne })
+        ) : null,
+        showByteRover ? e(React.Fragment, null,
+          e(Separator, null),
+          e(ByteRoverSection, { byterover: byterover, filters: filters, setFilters: setFilters, refresh: refresh, loading: loading })
         ) : null,
         showHindsight ? e(React.Fragment, null,
           e(Separator, null),

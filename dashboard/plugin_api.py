@@ -14,6 +14,8 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -34,7 +36,7 @@ except Exception:  # Allows local syntax/import tests outside the dashboard.
 
 router = APIRouter()
 
-PLUGIN_VERSION = "0.4.7"
+PLUGIN_VERSION = "0.5.0"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
@@ -48,9 +50,64 @@ DEFAULT_HINDSIGHT_LIMIT = 25
 MAX_HINDSIGHT_LIMIT = 100
 DEFAULT_MNEMOSYNE_LIMIT = 25
 MAX_MNEMOSYNE_LIMIT = 100
+DEFAULT_BYTEROVER_LIMIT = 10
+MAX_BYTEROVER_LIMIT = 50
+DEFAULT_BYTEROVER_QUERY_TIMEOUT = 60
 HINDSIGHT_DEFAULT_CLOUD_URL = "https://api.hindsight.vectorize.io"
 HINDSIGHT_DEFAULT_LOCAL_URL = "http://localhost:8888"
 VALID_HINDSIGHT_BUDGETS = {"low", "mid", "high"}
+REDACTED = "[REDACTED]"
+SECRET_QUERY_KEYS = {
+    "access_token",
+    "apikey",
+    "api_key",
+    "auth",
+    "authorization",
+    "bearer",
+    "client_secret",
+    "key",
+    "password",
+    "secret",
+    "token",
+}
+
+
+def _redact_url(value: str) -> str:
+    """Redact URL userinfo and secret-looking query values before returning JSON."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except Exception:
+        return value
+    if not parsed.scheme or not parsed.netloc:
+        return value
+
+    netloc = parsed.netloc
+    if parsed.username is not None or parsed.password is not None:
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        netloc = f"{REDACTED}@{host}{port}"
+
+    query_parts = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    redacted_query = urllib.parse.urlencode([
+        (key, REDACTED if key.lower() in SECRET_QUERY_KEYS else value)
+        for key, value in query_parts
+    ]).replace("%5BREDACTED%5D", REDACTED)
+    return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, redacted_query, parsed.fragment))
+
+
+def _safe_error(exc: BaseException | str) -> str:
+    """Return an error string safe for dashboard JSON responses."""
+    text = str(exc)
+    text = re.sub(r"https?://[^\s'\"<>]+", lambda match: _redact_url(match.group(0)), text)
+    text = re.sub(r"(?i)\bBearer\s+[^\s,;]+", f"Bearer {REDACTED}", text)
+    text = re.sub(
+        r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|authorization)\s*[:=]\s*[^\s,;&]+",
+        lambda match: f"{match.group(1)}={REDACTED}",
+        text,
+    )
+    return text
 
 
 def _hermes_home() -> Path:
@@ -192,7 +249,7 @@ def _read_builtin_store(store_id: str, filename: str, label: str, limit: int) ->
             "char_limit": limit,
             "usage_percent": 0,
             "modified_at": None,
-            "error": str(exc),
+            "error": _safe_error(exc),
         }
 
 
@@ -326,7 +383,7 @@ def _holographic_payload(
             base["facts"] = facts
             base["fact_count"] = len(facts)
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
 
     return base
 
@@ -464,7 +521,7 @@ def _mem0_payload(
         base["memories"] = _filter_mem0_memories(all_memories, None, limit)
         base["memory_count"] = len(base["memories"])
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
 
     return base
 
@@ -600,7 +657,7 @@ def _honcho_config_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str,
             "_client_config": cfg,
         })
     except Exception as exc:
-        base["_import_error"] = f"Honcho provider helpers unavailable: {exc}"
+        base["_import_error"] = f"Honcho provider helpers unavailable: {_safe_error(exc)}"
     return base
 
 
@@ -760,7 +817,7 @@ def _honcho_payload(
         base["search_results"] = _honcho_search_results(base, search, limit)
         base["search_result_count"] = len(base["search_results"])
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
     return base
 
 
@@ -1097,7 +1154,7 @@ def _mnemosyne_contents_payload(
             base["facts"] = _mnemosyne_fetch_facts(conn, limit=limit, search=search)
             base["fact_count"] = len(base["facts"])
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
     return base
 
 
@@ -1108,7 +1165,7 @@ def _load_mnemosyne_provider_class() -> Any:
 
         return MnemosyneMemoryProvider
     except Exception as exc:
-        errors.append(f"plugins.memory.mnemosyne: {exc}")
+        errors.append(f"plugins.memory.mnemosyne: {_safe_error(exc)}")
 
     plugin_file = _hermes_home() / "plugins" / "mnemosyne" / "__init__.py"
     if plugin_file.exists():
@@ -1121,14 +1178,14 @@ def _load_mnemosyne_provider_class() -> Any:
                 if provider_cls is not None:
                     return provider_cls
         except Exception as exc:
-            errors.append(f"{plugin_file}: {exc}")
+            errors.append(f"{plugin_file}: {_safe_error(exc)}")
 
     try:
         from hermes_memory_provider import MnemosyneMemoryProvider  # type: ignore
 
         return MnemosyneMemoryProvider
     except Exception as exc:
-        errors.append(f"hermes_memory_provider: {exc}")
+        errors.append(f"hermes_memory_provider: {_safe_error(exc)}")
 
     raise RuntimeError("Mnemosyne provider is not available in the dashboard environment: " + "; ".join(errors))
 
@@ -1230,7 +1287,7 @@ def _mnemosyne_payload(
         )
         decoded = _decode_mnemosyne_response(response)
         if decoded.get("error"):
-            base["error"] = str(decoded.get("error"))
+            base["error"] = _safe_error(decoded.get("error"))
         raw_results = decoded.get("results") or decoded.get("memories") or decoded.get("matches") or []
         if isinstance(raw_results, dict):
             raw_results = list(raw_results.values())
@@ -1240,7 +1297,7 @@ def _mnemosyne_payload(
         base["result_count"] = len(base["results"])
         base["result_source"] = "mnemosyne_recall"
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
     finally:
         shutdown = getattr(provider, "shutdown", None) if provider is not None else None
         if callable(shutdown):
@@ -1289,7 +1346,7 @@ def _load_hindsight_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
         "config_path": str(config_path),
         "config_exists": bool(config_exists),
         "mode": mode,
-        "api_url": str(api_url),
+        "api_url": _redact_url(str(api_url)),
         "api_key_present": bool(api_key),
         "llm_key_present": bool(llm_key),
         "llm_provider": file_cfg.get("llm_provider") or "",
@@ -1313,6 +1370,7 @@ def _load_hindsight_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
         "timeout": file_cfg.get("timeout") if file_cfg.get("timeout") is not None else _env_value("HINDSIGHT_TIMEOUT", "120"),
         "idle_timeout": file_cfg.get("idle_timeout") if file_cfg.get("idle_timeout") is not None else _env_value("HINDSIGHT_IDLE_TIMEOUT", "300"),
         "profile": file_cfg.get("profile", "hermes"),
+        "_api_url": str(api_url),
         "_api_key": api_key,
         "_file_config": file_cfg,
     }
@@ -1341,7 +1399,7 @@ def _normalize_hindsight_result(item: Any, index: int) -> Dict[str, Any]:
 def _hindsight_should_manage_local_daemon(cfg: Dict[str, Any]) -> bool:
     if cfg.get("mode") != "local_embedded":
         return False
-    parsed = urllib.parse.urlparse(str(cfg.get("api_url") or HINDSIGHT_DEFAULT_LOCAL_URL))
+    parsed = urllib.parse.urlparse(str(cfg.get("_api_url") or HINDSIGHT_DEFAULT_LOCAL_URL))
     return parsed.hostname in {"127.0.0.1", "localhost", "::1"}
 
 
@@ -1358,10 +1416,10 @@ def _ensure_hindsight_local_daemon(cfg: Dict[str, Any]) -> Optional[str]:
     except FileNotFoundError:
         return "hindsight-embed command not found in dashboard environment"
     except Exception as exc:
-        return f"Could not start local Hindsight daemon: {exc}"
+        return f"Could not start local Hindsight daemon: {_safe_error(exc)}"
     if result.returncode not in (0,):
         output = (result.stderr or result.stdout or "").strip()
-        return output or f"hindsight-embed daemon start exited with {result.returncode}"
+        return _safe_error(output) or f"hindsight-embed daemon start exited with {result.returncode}"
     return None
 
 
@@ -1407,7 +1465,7 @@ def _hindsight_client_call(cfg: Dict[str, Any], fn: Callable[[Any], Any]) -> Any
         from hindsight_client import Hindsight  # type: ignore
 
         client = Hindsight(
-            base_url=str(cfg.get("api_url") or HINDSIGHT_DEFAULT_LOCAL_URL).rstrip("/"),
+            base_url=str(cfg.get("_api_url") or HINDSIGHT_DEFAULT_LOCAL_URL).rstrip("/"),
             api_key=cfg.get("_api_key") or None,
             timeout=_hindsight_timeout_seconds(cfg),
             user_agent=f"hermes-memory-ui-dashboard/{PLUGIN_VERSION}",
@@ -1546,7 +1604,7 @@ def _hindsight_contents_payload(
         base["document_count"] = len(base["documents"])
         base["total_documents"] = content.get("total_documents", base["document_count"])
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
     return base
 
 
@@ -1629,7 +1687,7 @@ def _hindsight_payload(
         base["result_source"] = "hindsight_recall"
         base["result_count"] = len(base["results"])
     except Exception as exc:
-        base["error"] = str(exc)
+        base["error"] = _safe_error(exc)
     finally:
         shutdown = getattr(provider, "shutdown", None) if provider is not None else None
         if callable(shutdown):
@@ -1643,6 +1701,342 @@ def _hindsight_payload(
     return base
 
 
+def _load_byterover_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Load non-secret ByteRover CLI configuration for read-only dashboard access."""
+    config = config if config is not None else _read_yaml(_hermes_home() / "config.yaml")
+    home = _hermes_home()
+    config_path = home / "byterover.json"
+    file_cfg = _read_json(config_path)
+    plugin_cfg = _dig(config, "plugins", "hermes-memory-ui", "byterover", default={})
+    if not isinstance(plugin_cfg, dict):
+        plugin_cfg = {}
+
+    def pick(key: str, env_key: str, default: Any = "") -> Any:
+        value = os.environ.get(env_key, default)
+        if key in plugin_cfg and plugin_cfg.get(key) not in (None, ""):
+            value = plugin_cfg.get(key)
+        if key in file_cfg and file_cfg.get(key) not in (None, ""):
+            value = file_cfg.get(key)
+        return value
+
+    brv_path = str(pick("brv_path", "BRV_PATH", "brv"))
+    if os.path.basename(brv_path) == brv_path:
+        resolved_brv = shutil.which(brv_path)
+    else:
+        expanded_brv = _expand_path(brv_path, home)
+        resolved_brv = str(expanded_brv) if expanded_brv and expanded_brv.exists() else None
+    project_root = str(pick("project_root", "BYTEROVER_PROJECT_ROOT", "") or "")
+    if project_root:
+        expanded = _expand_path(project_root, home)
+        project_root = str(expanded) if expanded else project_root
+    search_scope = str(pick("search_scope", "BYTEROVER_SEARCH_SCOPE", "") or "")
+    try:
+        query_timeout = int(pick("query_timeout", "BYTEROVER_QUERY_TIMEOUT", DEFAULT_BYTEROVER_QUERY_TIMEOUT))
+    except Exception:
+        query_timeout = DEFAULT_BYTEROVER_QUERY_TIMEOUT
+    return {
+        "config_path": str(config_path),
+        "config_exists": config_path.exists(),
+        "brv_path": brv_path,
+        "resolved_brv_path": resolved_brv or "",
+        "brv_available": bool(resolved_brv),
+        "project_root": project_root,
+        "project_exists": bool(project_root and Path(project_root).exists()),
+        "search_scope": search_scope,
+        "query_timeout": max(1, min(query_timeout, 300)),
+    }
+
+
+def _run_byterover_command(cfg: Dict[str, Any], args: List[str], *, timeout: int = 30) -> Dict[str, Any]:
+    brv = cfg.get("resolved_brv_path") or cfg.get("brv_path") or "brv"
+    if not cfg.get("brv_available"):
+        return {"ok": False, "error": "brv command not found. Install ByteRover CLI or set BRV_PATH.", "data": None}
+    cwd = cfg.get("project_root") or "/tmp"
+    try:
+        result = subprocess.run(
+            [str(brv), *args],
+            cwd=cwd if Path(cwd).exists() else "/tmp",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": _safe_error(exc), "data": None}
+
+    raw = (result.stdout or result.stderr or "").strip()
+    parsed: Any = None
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = {"raw": raw}
+    if result.returncode != 0:
+        return {"ok": False, "error": _safe_error(raw or f"brv exited with {result.returncode}"), "data": parsed}
+    if isinstance(parsed, dict) and parsed.get("success") is False:
+        err = _dig(parsed, "data", "error", default=None) or parsed.get("error") or raw
+        return {"ok": False, "error": _safe_error(err), "data": parsed}
+    return {"ok": True, "error": None, "data": parsed}
+
+
+def _unwrap_byterover_data(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        return payload["data"]
+    return payload if isinstance(payload, dict) else {}
+
+
+def _compact_byterover_excerpt(text: str, query: Optional[str], *, radius: int = 180) -> str:
+    """Return a short search snippet around the first query keyword hit."""
+    text = re.sub(r"\n{3,}", "\n\n", str(text or "")).strip()
+    if not text:
+        return ""
+    terms = []
+    if query:
+        terms = [term for term in re.findall(r"[\w-]{3,}", query, flags=re.UNICODE) if term.lower() not in {"what", "which", "where", "when", "does", "with", "from", "about", "project"}]
+    lowered = text.lower()
+    facts_match = re.search(r"## Facts\s*(.*?)(?:\n## |\n---\n|\Z)", text, flags=re.IGNORECASE | re.DOTALL)
+    if facts_match and terms:
+        matching_facts = []
+        for line in facts_match.group(1).splitlines():
+            stripped = line.strip()
+            if (
+                stripped.startswith("- ")
+                and any(term.lower() in stripped.lower() for term in terms)
+                and "preferred search" not in stripped.lower()
+            ):
+                matching_facts.append(stripped[2:].strip().rstrip(".") + ".")
+        if matching_facts:
+            return " ".join(matching_facts[:3])
+
+    hit = -1
+    for term in sorted(terms, key=len, reverse=True):
+        hit = lowered.find(term.lower())
+        if hit >= 0:
+            break
+    if hit < 0:
+        if len(text) <= radius * 2:
+            return text
+        return text[: radius * 2].rstrip() + "…"
+
+    start = max(0, hit - radius)
+    end = min(len(text), hit + radius)
+    # Prefer line/sentence boundaries when close enough, so snippets don't start mid-word.
+    boundary_start = max(text.rfind("\n", 0, start + 1), text.rfind(". ", 0, start + 1))
+    if boundary_start >= 0 and hit - boundary_start <= radius + 80:
+        start = boundary_start + (2 if text[boundary_start:boundary_start + 2] == ". " else 1)
+    boundary_end_candidates = [pos for pos in (text.find("\n", end), text.find(". ", end)) if pos >= 0]
+    if boundary_end_candidates:
+        boundary_end = min(boundary_end_candidates)
+        if boundary_end - hit <= radius + 120:
+            end = boundary_end + (1 if text[boundary_end:boundary_end + 2] == ". " else 0)
+    snippet = text[start:end].strip()
+    if start > 0:
+        snippet = "…" + snippet
+    if end < len(text):
+        snippet = snippet.rstrip() + "…"
+    return snippet
+
+
+def _normalize_byterover_result(item: Any, index: int, query: Optional[str] = None, project_root: Optional[str] = None) -> Dict[str, Any]:
+    if not isinstance(item, dict):
+        return {"id": str(index + 1), "path": "", "score": None, "excerpt": _compact_byterover_excerpt(str(item), query), "raw_excerpt": str(item), "metadata": {}}
+    text = item.get("excerpt") or item.get("snippet") or item.get("content") or item.get("text") or item.get("summary") or ""
+    path = item.get("path") or item.get("file") or item.get("source") or ""
+    raw_text = str(text)
+    full_text = ""
+    if project_root and path:
+        try:
+            candidate = Path(project_root) / ".brv" / "context-tree" / str(path)
+            resolved = candidate.resolve()
+            root = (Path(project_root) / ".brv" / "context-tree").resolve()
+            if str(resolved).startswith(str(root)) and resolved.exists() and resolved.is_file():
+                full_text = resolved.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            full_text = ""
+    compact = _compact_byterover_excerpt(full_text or raw_text, query)
+    return {
+        "id": str(item.get("id") or path or index + 1),
+        "path": path,
+        "title": item.get("title") or item.get("name") or "",
+        "score": item.get("score") or item.get("rank") or item.get("similarity"),
+        "excerpt": compact,
+        "raw_excerpt": raw_text if raw_text != compact else "",
+        "metadata": _json_safe({k: v for k, v in item.items() if k not in {"id", "path", "file", "source", "title", "name", "score", "rank", "similarity", "excerpt", "snippet", "content", "text", "summary"}}),
+    }
+
+
+def _compact_byterover_answer(query: str, answer: str) -> str:
+    """Derive a short display answer from ByteRover's often-verbose query output."""
+    if not answer:
+        return ""
+    query_l = query.lower()
+
+    facts_match = re.search(r"## Facts\s*(.*?)(?:\n## |\n---\n|\Z)", answer, flags=re.IGNORECASE | re.DOTALL)
+    facts: List[str] = []
+    if facts_match:
+        for line in facts_match.group(1).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                facts.append(stripped[2:].strip())
+
+    if facts:
+        if "codename" in query_l:
+            codename_fact = next((fact for fact in facts if "codename" in fact.lower()), "")
+            if codename_fact:
+                codename_match = re.search(r"codename\s+is\s+([^.;`]+)", codename_fact, flags=re.IGNORECASE)
+                codename = codename_match.group(1).strip() if codename_match else ""
+                if codename and codename.lower() not in query_l:
+                    return f"No. The project codename is {codename}."
+                return codename_fact.rstrip(".") + "."
+        if "owner" in query_l or "owns" in query_l or "who" in query_l:
+            owner_fact = next((fact for fact in facts if "owner" in fact.lower()), "")
+            if owner_fact:
+                return owner_fact.rstrip(".") + "."
+        if "retention" in query_l or "expire" in query_l or "sync" in query_l:
+            retention = [
+                fact.rstrip(".") + "."
+                for fact in facts
+                if any(term in fact.lower() for term in ("retention", "expire", "sync"))
+                and "preferred search" not in fact.lower()
+            ]
+            if retention:
+                return " ".join(retention[:3])
+
+        query_terms = {term for term in re.findall(r"[a-z0-9][a-z0-9_-]{2,}", query_l) if term not in {"what", "which", "where", "when", "does", "with", "from", "about", "project"}}
+        ranked = []
+        for fact in facts:
+            fact_l = fact.lower()
+            score = sum(1 for term in query_terms if term in fact_l)
+            if score:
+                ranked.append((score, fact))
+        if ranked:
+            ranked.sort(key=lambda item: item[0], reverse=True)
+            return " ".join(fact.rstrip(".") + "." for _score, fact in ranked[:2])
+        return facts[0].rstrip(".") + "."
+
+    summary_match = re.search(r"\*\*Summary\*\*:\s*(.*?)(?:\n\n|\Z)", answer, flags=re.IGNORECASE | re.DOTALL)
+    if summary_match:
+        return summary_match.group(1).strip()
+    return answer.strip().splitlines()[0][:500]
+
+
+def _byterover_payload(
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    limit: int = DEFAULT_BYTEROVER_LIMIT,
+    search: Optional[str] = None,
+) -> Dict[str, Any]:
+    config = config if config is not None else _read_yaml(_hermes_home() / "config.yaml")
+    provider = _dig(config, "memory", "provider", default=None)
+    cfg = _load_byterover_config(config)
+    search = search if isinstance(search, str) and search.strip() else None
+    try:
+        limit = int(limit or DEFAULT_BYTEROVER_LIMIT)
+    except Exception:
+        limit = DEFAULT_BYTEROVER_LIMIT
+    limit = max(1, min(limit, MAX_BYTEROVER_LIMIT))
+
+    base: Dict[str, Any] = {
+        "id": "byterover",
+        "label": "ByteRover memory",
+        "provider_configured": provider == "byterover",
+        "mode": "read-only",
+        "config_path": cfg["config_path"],
+        "config_exists": cfg["config_exists"],
+        "brv_available": cfg["brv_available"],
+        "brv_path": cfg["resolved_brv_path"] or cfg["brv_path"],
+        "project_root": cfg["project_root"],
+        "project_exists": cfg["project_exists"],
+        "search_scope": cfg["search_scope"],
+        "locations": [],
+        "location_count": 0,
+        "status": {},
+        "results": [],
+        "result_count": 0,
+        "total_found": 0,
+        "search": search or "",
+        "limit": limit,
+        "error": None,
+        "generated_at": time.time(),
+    }
+
+    if not cfg["brv_available"]:
+        base["error"] = "brv command not found. Install ByteRover CLI or set BRV_PATH."
+        return base
+
+    locations = _run_byterover_command(cfg, ["locations", "--format", "json"], timeout=20)
+    if locations["ok"]:
+        data = _unwrap_byterover_data(locations["data"])
+        locs = data.get("locations", []) if isinstance(data, dict) else []
+        base["locations"] = [_json_safe(item) for item in (locs if isinstance(locs, list) else [])]
+        base["location_count"] = len(base["locations"])
+    elif locations["error"]:
+        base["error"] = locations["error"]
+
+    status_args = ["status", "--format", "json"]
+    if cfg.get("project_root"):
+        status_args.extend(["--project-root", str(cfg["project_root"])])
+        status = _run_byterover_command(cfg, status_args, timeout=20)
+        if status["ok"]:
+            base["status"] = _json_safe(_unwrap_byterover_data(status["data"]))
+        elif status["error"] and not base["error"]:
+            base["error"] = status["error"]
+    elif search:
+        base["error"] = "ByteRover project_root is not configured. Set project_root in $HERMES_HOME/byterover.json or BYTEROVER_PROJECT_ROOT before running search."
+
+    if search and cfg.get("project_root"):
+        search_args = ["search", search, "--format", "json", "--limit", str(limit)]
+        if cfg.get("search_scope"):
+            search_args.extend(["--scope", str(cfg["search_scope"])])
+        found = _run_byterover_command(cfg, search_args, timeout=30)
+        if found["ok"]:
+            data = _unwrap_byterover_data(found["data"])
+            results = data.get("results", []) if isinstance(data, dict) else []
+            results = results if isinstance(results, list) else []
+            base["results"] = [_normalize_byterover_result(item, index, search, cfg.get("project_root")) for index, item in enumerate(results[:limit])]
+            base["result_count"] = len(base["results"])
+            base["total_found"] = data.get("totalFound", base["result_count"]) if isinstance(data, dict) else base["result_count"]
+        elif found["error"]:
+            base["error"] = found["error"]
+
+    return base
+
+
+def _byterover_query_payload(
+    query: str,
+    config: Optional[Dict[str, Any]] = None,
+    *,
+    timeout: Optional[int] = None,
+) -> Dict[str, Any]:
+    config = config if config is not None else _read_yaml(_hermes_home() / "config.yaml")
+    cfg = _load_byterover_config(config)
+    base = _byterover_payload(config, limit=DEFAULT_BYTEROVER_LIMIT, search=None)
+    base.update({"operation": "query", "query": query, "answer": "", "answer_summary": "", "matched_docs": [], "task_id": None})
+    if not query.strip():
+        base["error"] = "Query is required."
+        return base
+    if not cfg.get("project_root"):
+        base["error"] = "ByteRover project_root is not configured. Set project_root in $HERMES_HOME/byterover.json or BYTEROVER_PROJECT_ROOT before running query."
+        return base
+    command_timeout = int(timeout or cfg.get("query_timeout") or DEFAULT_BYTEROVER_QUERY_TIMEOUT)
+    result = _run_byterover_command(
+        cfg,
+        ["query", query, "--format", "json"],
+        timeout=command_timeout + 5,
+    )
+    if not result["ok"]:
+        base["error"] = result["error"]
+        return base
+    data = _unwrap_byterover_data(result["data"])
+    base["answer"] = str(data.get("result") or data.get("answer") or "") if isinstance(data, dict) else ""
+    base["answer_summary"] = _compact_byterover_answer(query, base["answer"])
+    base["matched_docs"] = _json_safe(data.get("matchedDocs", [])) if isinstance(data, dict) else []
+    base["task_id"] = data.get("taskId") if isinstance(data, dict) else None
+    base["top_score"] = data.get("topScore") if isinstance(data, dict) else None
+    return base
+
+
 @router.get("/status")
 async def status() -> Dict[str, Any]:
     home = _hermes_home()
@@ -1652,6 +2046,7 @@ async def status() -> Dict[str, Any]:
     honcho_cfg = _honcho_config_payload(config)
     mnemosyne_cfg = _load_mnemosyne_config(config)
     hindsight_cfg = _load_hindsight_config(config)
+    byterover_cfg = _load_byterover_config(config)
     return {
         "plugin": "hermes-memory-ui",
         "version": PLUGIN_VERSION,
@@ -1700,6 +2095,16 @@ async def status() -> Dict[str, Any]:
             "prefetch_content_chars": mnemosyne_cfg["prefetch_content_chars"],
             "auto_sleep_enabled": mnemosyne_cfg["auto_sleep_enabled"],
             "provider_configured": mnemosyne_cfg["provider_configured"],
+        },
+        "byterover": {
+            "config_path": byterover_cfg["config_path"],
+            "config_exists": byterover_cfg["config_exists"],
+            "brv_available": byterover_cfg["brv_available"],
+            "brv_path": byterover_cfg["resolved_brv_path"] or byterover_cfg["brv_path"],
+            "project_root": byterover_cfg["project_root"],
+            "project_exists": byterover_cfg["project_exists"],
+            "search_scope": byterover_cfg["search_scope"],
+            "provider_configured": _dig(config, "memory", "provider", default=None) == "byterover",
         },
         "hindsight": {
             "config_path": hindsight_cfg["config_path"],
@@ -1751,6 +2156,22 @@ async def honcho(
     search: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     return _honcho_payload(limit=limit, search=search or None)
+
+
+@router.get("/byterover")
+async def byterover(
+    limit: int = Query(DEFAULT_BYTEROVER_LIMIT, ge=1, le=MAX_BYTEROVER_LIMIT),
+    search: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    return _byterover_payload(limit=limit, search=search or None)
+
+
+@router.get("/byterover/query")
+async def byterover_query(
+    query: str = Query(...),
+    timeout: int = Query(DEFAULT_BYTEROVER_QUERY_TIMEOUT, ge=1, le=300),
+) -> Dict[str, Any]:
+    return _byterover_query_payload(query=query, timeout=timeout)
 
 
 @router.get("/hindsight")
@@ -1833,6 +2254,7 @@ async def snapshot(
         "mem0": _mem0_payload(config, limit=limit, search=search or None),
         "honcho": _honcho_payload(config, limit=limit, search=search or None),
         "mnemosyne": _mnemosyne_contents_payload(config, limit=limit, search=search or None),
+        "byterover": _byterover_payload(config, limit=limit, search=search or None),
         "hindsight": _hindsight_payload(config, mode="status"),
         "generated_at": time.time(),
     }
