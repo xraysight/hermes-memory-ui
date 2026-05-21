@@ -1747,6 +1747,40 @@ def _load_byterover_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
     }
 
 
+def _parse_byterover_json_output(raw: str) -> Any:
+    """Parse ByteRover JSON output, accepting both single JSON and JSON-lines events."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    events: List[Any] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except Exception:
+            return {"raw": raw}
+    if not events:
+        return {"raw": raw}
+
+    completed = None
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        marker = str(event.get("event") or event.get("status") or "").lower()
+        if marker == "completed":
+            completed = event
+    if isinstance(completed, dict):
+        data = completed.get("data") if isinstance(completed.get("data"), dict) else completed
+        return {"success": True, "data": data, "events": events}
+    return {"success": True, "data": events[-1] if isinstance(events[-1], dict) else {"events": events}, "events": events}
+
+
 def _run_byterover_command(cfg: Dict[str, Any], args: List[str], *, timeout: int = 30) -> Dict[str, Any]:
     brv = cfg.get("resolved_brv_path") or cfg.get("brv_path") or "brv"
     if not cfg.get("brv_available"):
@@ -1766,12 +1800,7 @@ def _run_byterover_command(cfg: Dict[str, Any], args: List[str], *, timeout: int
         return {"ok": False, "error": _safe_error(exc), "data": None}
 
     raw = (result.stdout or result.stderr or "").strip()
-    parsed: Any = None
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            parsed = {"raw": raw}
+    parsed: Any = _parse_byterover_json_output(raw) if raw else None
     if result.returncode != 0:
         return {"ok": False, "error": _safe_error(raw or f"brv exited with {result.returncode}"), "data": parsed}
     if isinstance(parsed, dict) and parsed.get("success") is False:
@@ -1850,8 +1879,13 @@ def _normalize_byterover_result(item: Any, index: int, query: Optional[str] = No
             candidate = Path(project_root) / ".brv" / "context-tree" / str(path)
             resolved = candidate.resolve()
             root = (Path(project_root) / ".brv" / "context-tree").resolve()
-            if str(resolved).startswith(str(root)) and resolved.exists() and resolved.is_file():
-                full_text = resolved.read_text(encoding="utf-8", errors="replace")
+            if resolved.exists() and resolved.is_file():
+                try:
+                    resolved.relative_to(root)
+                except ValueError:
+                    full_text = ""
+                else:
+                    full_text = resolved.read_text(encoding="utf-8", errors="replace")
         except Exception:
             full_text = ""
     compact = _compact_byterover_excerpt(full_text or raw_text, query)
@@ -1976,7 +2010,6 @@ def _byterover_payload(
 
     status_args = ["status", "--format", "json"]
     if cfg.get("project_root"):
-        status_args.extend(["--project-root", str(cfg["project_root"])])
         status = _run_byterover_command(cfg, status_args, timeout=20)
         if status["ok"]:
             base["status"] = _json_safe(_unwrap_byterover_data(status["data"]))
