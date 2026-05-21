@@ -18,6 +18,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -1333,7 +1334,12 @@ def _load_hindsight_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
     api_key = file_cfg.get("apiKey") or file_cfg.get("api_key") or _env_value("HINDSIGHT_API_KEY", "")
     llm_key = file_cfg.get("llmApiKey") or file_cfg.get("llm_api_key") or _env_value("HINDSIGHT_LLM_API_KEY", "")
     default_url = HINDSIGHT_DEFAULT_LOCAL_URL if mode in {"local_embedded", "local_external"} else HINDSIGHT_DEFAULT_CLOUD_URL
-    api_url = file_cfg.get("api_url") or _env_value("HINDSIGHT_API_URL", default_url)
+    api_url = (
+        file_cfg.get("api_url")
+        or _env_value("HINDSIGHT_API_URL", "")
+        or _env_value("HINDSIGHT_DAEMON_URL", "")
+        or default_url
+    )
     banks = file_cfg.get("banks") if isinstance(file_cfg.get("banks"), dict) else {}
     hermes_bank = banks.get("hermes") if isinstance(banks.get("hermes"), dict) else {}
     bank_id = file_cfg.get("bank_id") or hermes_bank.get("bankId") or _env_value("HINDSIGHT_BANK_ID", "hermes")
@@ -1403,18 +1409,66 @@ def _hindsight_should_manage_local_daemon(cfg: Dict[str, Any]) -> bool:
     return parsed.hostname in {"127.0.0.1", "localhost", "::1"}
 
 
+def _hindsight_embed_candidates() -> List[Path]:
+    candidates: List[Path] = []
+    which = shutil.which("hindsight-embed")
+    if which:
+        candidates.append(Path(which))
+    try:
+        candidates.append(Path(sys.executable).with_name("hindsight-embed"))
+    except Exception:
+        pass
+    candidates.extend([
+        _hermes_home() / "hermes-agent" / "venv" / "bin" / "hindsight-embed",
+        Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "hindsight-embed",
+        Path.home() / ".local" / "bin" / "hindsight-embed",
+    ])
+
+    seen = set()
+    unique: List[Path] = []
+    for candidate in candidates:
+        text = str(candidate)
+        if text and text not in seen:
+            unique.append(candidate)
+            seen.add(text)
+    return unique
+
+
+def _resolve_hindsight_embed() -> tuple[Optional[str], Dict[str, Any]]:
+    candidates = _hindsight_embed_candidates()
+    checked = [str(path) for path in candidates]
+    resolved = None
+    for path in candidates:
+        if path.exists() and os.access(path, os.X_OK):
+            resolved = str(path)
+            break
+    diagnostics = {
+        "PATH": os.environ.get("PATH", ""),
+        "sys_executable": sys.executable,
+        "checked_paths": checked,
+        "resolved_path": resolved,
+    }
+    return resolved, diagnostics
+
+
 def _ensure_hindsight_local_daemon(cfg: Dict[str, Any]) -> Optional[str]:
     """Best-effort start for local_embedded Hindsight before client calls."""
     if not _hindsight_should_manage_local_daemon(cfg):
         return None
     profile = str(cfg.get("profile") or "hermes")
-    cmd = ["hindsight-embed", "-p", profile, "daemon", "start"]
+    binary, diagnostics = _resolve_hindsight_embed()
+    diagnostics.update({"profile": profile, "mode": cfg.get("mode")})
+    if not binary:
+        safe_diagnostics = _safe_error(json.dumps(diagnostics, sort_keys=True))
+        return f"hindsight-embed command not found in dashboard environment; diagnostics={safe_diagnostics}"
+    cmd = [binary, "-p", profile, "daemon", "start"]
     env = os.environ.copy()
     env.setdefault("HERMES_HOME", str(_hermes_home()))
     try:
         result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
-        return "hindsight-embed command not found in dashboard environment"
+        safe_diagnostics = _safe_error(json.dumps(diagnostics, sort_keys=True))
+        return f"hindsight-embed command not found in dashboard environment; diagnostics={safe_diagnostics}"
     except Exception as exc:
         return f"Could not start local Hindsight daemon: {_safe_error(exc)}"
     if result.returncode not in (0,):
