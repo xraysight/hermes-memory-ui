@@ -7,6 +7,9 @@ Current scope:
 - Built-in memory:
   * `MEMORY.md` — agent notes / environment facts / project conventions
   * `USER.md` — user profile / preferences
+- Session search:
+  * explicit read-only search over previous Hermes sessions via Hermes' `session_search` tool
+  * optional source/type filter such as CLI, Telegram, cron, Discord, web, or API sessions
 - External memory providers:
   * Holographic memory:
     + local SQLite fact store, default: `$HERMES_HOME/memory_store.db`
@@ -131,6 +134,13 @@ Built-in memory section:
 - path, file existence, modification time
 - entry count and char usage bar
 - parsed entries
+
+Session search section:
+
+- explicit query box for previous Hermes sessions
+- optional session type/source filter
+- newest-first results with snippets and short message context
+- no automatic search on page load and no memory writes
 
 Holographic memory section, displayed only when `memory.provider` is currently `holographic`:
 
@@ -380,6 +390,23 @@ Returns parsed built-in memory stores:
 Entries are split on Hermes' built-in delimiter §.
 
 The response includes entry count, char count, configured/default char limits, usage percentage, file path, and modified timestamp.
+
+### GET `/session-search`
+
+Runs an explicit read-only search over previous Hermes sessions through Hermes' built-in `session_search` tool. This endpoint is not called from `/snapshot` or page load; the UI calls it only after the user submits a query.
+
+Query parameters:
+
+- `query`: required search query
+- `limit`: 1-10, default 3
+- `sort`: `newest` or `oldest`, default `newest`
+- `source`: optional exact source/type filter, e.g. `cli`, `telegram`, `cron`, `discord`, `web`, or `api`
+
+Example:
+
+```bash
+curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/session-search?query=dashboard&limit=3&sort=newest' | jq
+```
 
 ### GET `/holographic`
 

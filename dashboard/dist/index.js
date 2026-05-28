@@ -21,10 +21,11 @@
 
   function fmtTime(value) {
     if (!value) return "—";
-    if (typeof value === "number") {
-      return new Date(value * 1000).toLocaleString();
-    }
-    return String(value).replace("T", " ").replace(/\.\d+$/, "");
+    const date = typeof value === "number"
+      ? new Date(value < 1000000000000 ? value * 1000 : value)
+      : new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" });
   }
 
   function pct(value) {
@@ -82,8 +83,8 @@
         e("div", { className: "memory-ui-title-row" },
           e(CardTitle, { className: "text-base" }, store.label),
           e("div", { className: "memory-ui-badges" },
-            e(Badge, { variant: "outline" }, store.entry_count + " entries"),
-            e(Badge, { variant: store.exists ? "outline" : "secondary" }, store.exists ? "file found" : "not created")
+            e(Badge, { tone: "outline" }, store.entry_count + " entries"),
+            e(Badge, { tone: store.exists ? "outline" : "secondary" }, store.exists ? "file found" : "not created")
           )
         ),
         e("button", { className: "memory-ui-link-button", onClick: function () { setExpanded(!expanded); } }, expanded ? "Collapse" : "Expand")
@@ -116,13 +117,118 @@
           e("h2", null, "Built-in memory"),
           e("p", null, "Read-only view of MEMORY.md and USER.md from the active Hermes profile.")
         ),
-        e(Badge, { variant: "outline" }, builtin.total_entries + " total entries")
+        e(Badge, { tone: "outline" }, builtin.total_entries + " total entries")
       ),
       e("div", { className: "memory-ui-grid-2" },
         (builtin.stores || []).map(function (store) {
           return e(BuiltinStoreCard, { key: store.id, store: store });
         })
       )
+    );
+  }
+
+  function SessionSearchResultRow(props) {
+    const result = props.result || {};
+    const messages = (result.messages || []).slice(0, 4);
+    const title = result.title || result.session_id || "Session";
+    return e("div", { className: "memory-ui-fact" },
+      e("div", { className: "memory-ui-fact-top" },
+        e(Badge, { tone: "outline" }, result.source || "session"),
+        result.when ? e("span", { className: "memory-ui-muted" }, result.when) : null,
+        result.match_message_id ? e("span", { className: "memory-ui-muted" }, "match #", result.match_message_id) : null
+      ),
+      e("div", { className: "memory-ui-fact-content" }, title),
+      result.snippet ? e("div", { className: "memory-ui-tags" }, result.snippet) : null,
+      messages.length ? e("div", { className: "memory-ui-entry-list" },
+        messages.map(function (message) {
+          return e("div", { key: "session-message-" + message.id, className: "memory-ui-entry" },
+            e("div", { className: "memory-ui-entry-index" }, message.role || "msg"),
+            e("div", { className: "memory-ui-entry-content" }, message.content || "")
+          );
+        })
+      ) : null
+    );
+  }
+
+  function SessionSearchSection() {
+    const [query, setQuery] = useState("");
+    const [source, setSource] = useState("");
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    function clearSearch() {
+      setQuery("");
+      setSource("");
+      setData(null);
+      setError(null);
+    }
+
+    function runSearch() {
+      if (!query.trim()) {
+        setError("Enter a session search query first.");
+        return;
+      }
+      const p = new URLSearchParams();
+      p.set("query", query.trim());
+      p.set("limit", "3");
+      p.set("sort", "newest");
+      if (source) p.set("source", source);
+      setLoading(true);
+      setError(null);
+      SDK.fetchJSON("/api/plugins/hermes-memory-ui/session-search?" + p.toString())
+        .then(function (payload) { setData(payload); })
+        .catch(function (err) { setError(err && err.message ? err.message : String(err)); })
+        .finally(function () { setLoading(false); });
+    }
+
+    const results = data && data.results ? data.results : [];
+    return e("div", { className: "memory-ui-section" },
+      e("div", { className: "memory-ui-section-header" },
+        e("div", null,
+          e("h2", null, "Session search"),
+          e("p", null, "Search previous Hermes sessions without changing memory state.")
+        ),
+        data ? e(Badge, { tone: "outline" }, (data.count || 0) + " matches") : null
+      ),
+      e("div", { className: "memory-ui-controls memory-ui-session-controls" },
+        e("div", { className: "memory-ui-control" },
+          e("label", null, "Query"),
+          e(Input, {
+            value: query,
+            placeholder: "search past sessions...",
+            onChange: function (ev) { setQuery(ev.target.value); },
+            onKeyDown: function (ev) { if (ev.key === "Enter") runSearch(); }
+          })
+        ),
+        e("div", { className: "memory-ui-control" },
+          e("label", null, "Session type"),
+          e("select", {
+            className: "memory-ui-select",
+            value: source,
+            onChange: function (ev) { setSource(ev.target.value); }
+          },
+            e("option", { value: "" }, "All sessions"),
+            e("option", { value: "cli" }, "CLI"),
+            e("option", { value: "telegram" }, "Telegram"),
+            e("option", { value: "cron" }, "Cron"),
+            e("option", { value: "discord" }, "Discord"),
+            e("option", { value: "web" }, "Web"),
+            e("option", { value: "api" }, "API")
+          )
+        ),
+        e("div", { className: "memory-ui-provider-actions" },
+          e(Button, { onClick: runSearch, className: "memory-ui-refresh", disabled: loading }, loading ? "Searching..." : "Search sessions"),
+          e(Button, { onClick: clearSearch, className: "memory-ui-refresh", outlined: true, disabled: loading && !query && !data && !source }, "Clear")
+        )
+      ),
+      e(ErrorBox, { error: error || (data && data.error) }),
+      data ? e("div", { className: "memory-ui-fact-list" },
+        e("div", { className: "memory-ui-muted" }, "Query: ", data.query || query, data.source ? " · type: " + data.source : "", data.message ? " · " + data.message : ""),
+        results.length
+          ? results.map(function (result, index) { return e(SessionSearchResultRow, { key: "session-search-" + index, result: result }); })
+          : e(EmptyState, null, data.error ? "Session search is unavailable." : "No matching sessions found.")
+      ) : null
     );
   }
 
@@ -137,7 +243,7 @@
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
         e("div", { className: "memory-ui-fact-id" }, "#" + fact.fact_id),
-        e(Badge, { variant: "outline" }, fact.category || "general"),
+        e(Badge, { tone: "outline" }, fact.category || "general"),
         e(TrustPill, { score: fact.trust_score }),
         e("span", { className: "memory-ui-muted" }, "retrieved ", fact.retrieval_count || 0, "x"),
         e("span", { className: "memory-ui-muted" }, "helpful ", fact.helpful_count || 0, "x")
@@ -164,8 +270,8 @@
           e("p", null, "Read-only view of the local SQLite fact store used by the holographic provider.")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: data.exists ? "outline" : "secondary" }, data.exists ? "db found" : "db missing"),
-          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active")
+          e(Badge, { tone: data.exists ? "outline" : "secondary" }, data.exists ? "db found" : "db missing"),
+          e(Badge, { tone: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active")
         )
       ),
       e("div", { className: "memory-ui-grid-4" },
@@ -242,9 +348,9 @@
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
         e("div", { className: "memory-ui-fact-id" }, "#" + memory.id),
-        memory.score !== null && memory.score !== undefined ? e(Badge, { variant: "outline" }, "score " + Number(memory.score).toFixed(3)) : null,
-        memory.user_id ? e(Badge, { variant: "outline" }, "user " + memory.user_id) : null,
-        memory.agent_id ? e(Badge, { variant: "outline" }, "agent " + memory.agent_id) : null
+        memory.score !== null && memory.score !== undefined ? e(Badge, { tone: "outline" }, "score " + Number(memory.score).toFixed(3)) : null,
+        memory.user_id ? e(Badge, { tone: "outline" }, "user " + memory.user_id) : null,
+        memory.agent_id ? e(Badge, { tone: "outline" }, "agent " + memory.agent_id) : null
       ),
       e("div", { className: "memory-ui-fact-content" }, memory.memory || ""),
       metadata ? e("div", { className: "memory-ui-tags" }, "metadata: ", metadata) : null,
@@ -266,9 +372,9 @@
           e("p", null, "Read-only view of Mem0 Platform memories scoped by the configured user_id.")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
-          e(Badge, { variant: "outline" }, "api mode"),
-          e(Badge, { variant: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key")
+          e(Badge, { tone: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { tone: "outline" }, "api mode"),
+          e(Badge, { tone: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key")
         )
       ),
       e("div", { className: "memory-ui-grid-4" },
@@ -319,7 +425,7 @@
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
         e("div", { className: "memory-ui-fact-id" }, "#" + conclusion.id),
-        conclusion.session_id ? e(Badge, { variant: "outline" }, "session " + conclusion.session_id) : null
+        conclusion.session_id ? e(Badge, { tone: "outline" }, "session " + conclusion.session_id) : null
       ),
       e("div", { className: "memory-ui-fact-content" }, conclusion.content || ""),
       e("div", { className: "memory-ui-muted" }, "Updated: ", fmtTime(conclusion.updated_at), " · Created: ", fmtTime(conclusion.created_at))
@@ -330,8 +436,8 @@
     const result = props.result;
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
-        e(Badge, { variant: "outline" }, result.source || "match"),
-        result.peer_id ? e(Badge, { variant: "outline" }, "peer " + result.peer_id) : null,
+        e(Badge, { tone: "outline" }, result.source || "match"),
+        result.peer_id ? e(Badge, { tone: "outline" }, "peer " + result.peer_id) : null,
         result.id ? e("span", { className: "memory-ui-muted" }, "#" + result.id) : null
       ),
       e("div", { className: "memory-ui-fact-content" }, result.content || "")
@@ -350,8 +456,8 @@
           e("div", { className: "memory-ui-muted" }, peer.peer_id || "—")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: "outline" }, ((peer.total_card_facts != null ? peer.total_card_facts : card.length)) + " card facts"),
-          e(Badge, { variant: "outline" }, ((peer.total_conclusions != null ? peer.total_conclusions : conclusions.length)) + " conclusions" + (peer.total_conclusions != null && peer.total_conclusions > conclusions.length ? " (showing " + conclusions.length + " latest)" : ""))
+          e(Badge, { tone: "outline" }, ((peer.total_card_facts != null ? peer.total_card_facts : card.length)) + " card facts"),
+          e(Badge, { tone: "outline" }, ((peer.total_conclusions != null ? peer.total_conclusions : conclusions.length)) + " conclusions" + (peer.total_conclusions != null && peer.total_conclusions > conclusions.length ? " (showing " + conclusions.length + " latest)" : ""))
         )
       ),
       e(CardContent, null,
@@ -394,10 +500,10 @@
           e("p", null, "Read-only view of Honcho workspace, peers, cards, representations, conclusions, and context search.")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
-          e(Badge, { variant: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key"),
-          e(Badge, { variant: data.base_url_present ? "outline" : "secondary" }, data.base_url_present ? "base URL" : "cloud/default"),
-          e(Badge, { variant: "outline" }, data.recall_mode || "hybrid")
+          e(Badge, { tone: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { tone: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key"),
+          e(Badge, { tone: data.base_url_present ? "outline" : "secondary" }, data.base_url_present ? "base URL" : "cloud/default"),
+          e(Badge, { tone: "outline" }, data.recall_mode || "hybrid")
         )
       ),
       e("div", { className: "memory-ui-grid-4" },
@@ -439,7 +545,7 @@
               e("div", { className: "memory-ui-muted" }, "Applied Honcho search"),
               e("div", { className: "memory-ui-fact-content" }, data.search)
             ),
-            e(Badge, { variant: "outline" }, (data.search_result_count || 0) + " text matches")
+            e(Badge, { tone: "outline" }, (data.search_result_count || 0) + " text matches")
           ),
           searchResults.length
             ? e("div", { className: "memory-ui-fact-list" }, searchResults.map(function (result, index) {
@@ -464,8 +570,8 @@
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
         e("div", { className: "memory-ui-fact-id" }, "#" + result.id),
-        result.score !== null && result.score !== undefined ? e(Badge, { variant: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
-        result.path ? e(Badge, { variant: "outline" }, result.path) : null
+        result.score !== null && result.score !== undefined ? e(Badge, { tone: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
+        result.path ? e(Badge, { tone: "outline" }, result.path) : null
       ),
       result.title ? e("div", { className: "memory-ui-muted" }, result.title) : null,
       e("div", { className: "memory-ui-fact-content" }, result.excerpt || ""),
@@ -513,9 +619,9 @@
           e("p", null, "Read-only ByteRover memory search and explicit query results via brv CLI.")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
-          e(Badge, { variant: data.brv_available ? "outline" : "secondary" }, data.brv_available ? "brv found" : "brv missing"),
-          e(Badge, { variant: data.project_exists ? "outline" : "secondary" }, data.project_exists ? "project set" : "auto project")
+          e(Badge, { tone: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { tone: data.brv_available ? "outline" : "secondary" }, data.brv_available ? "brv found" : "brv missing"),
+          e(Badge, { tone: data.project_exists ? "outline" : "secondary" }, data.project_exists ? "project set" : "auto project")
         )
       ),
       e("div", { className: "memory-ui-grid-1" },
@@ -590,8 +696,8 @@
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
         e("div", { className: "memory-ui-fact-id" }, "#" + result.id),
-        result.score !== null && result.score !== undefined ? e(Badge, { variant: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
-        typeLabel ? e(Badge, { variant: "outline" }, String(typeLabel).toUpperCase()) : null
+        result.score !== null && result.score !== undefined ? e(Badge, { tone: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
+        typeLabel ? e(Badge, { tone: "outline" }, String(typeLabel).toUpperCase()) : null
       ),
       e("div", { className: "memory-ui-fact-content" }, result.text || ""),
       metadata ? e("div", { className: "memory-ui-tags" }, "metadata: ", metadata) : null
@@ -651,10 +757,10 @@
           e("p", null, "Read-only view of Hindsight config and bank contents, plus explicit recall/reflect. No retain/write calls are exposed.")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
-          e(Badge, { variant: "outline" }, data.mode || "cloud"),
-          e(Badge, { variant: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key"),
-          e(Badge, { variant: data.llm_key_present ? "outline" : "secondary" }, data.llm_key_present ? "LLM key present" : "no LLM key")
+          e(Badge, { tone: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { tone: "outline" }, data.mode || "cloud"),
+          e(Badge, { tone: data.api_key_present ? "outline" : "secondary" }, data.api_key_present ? "api key present" : "no api key"),
+          e(Badge, { tone: data.llm_key_present ? "outline" : "secondary" }, data.llm_key_present ? "LLM key present" : "no LLM key")
         )
       ),
       e("div", { className: "memory-ui-grid-4" },
@@ -727,9 +833,9 @@
     return e("div", { className: "memory-ui-fact" },
       e("div", { className: "memory-ui-fact-top" },
         e("div", { className: "memory-ui-fact-id" }, "#" + result.id),
-        result.score !== null && result.score !== undefined ? e(Badge, { variant: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
-        typeLabel ? e(Badge, { variant: "outline" }, String(typeLabel).toUpperCase()) : null,
-        result.source ? e(Badge, { variant: "outline" }, String(result.source)) : null
+        result.score !== null && result.score !== undefined ? e(Badge, { tone: "outline" }, "score " + Number(result.score).toFixed(3)) : null,
+        typeLabel ? e(Badge, { tone: "outline" }, String(typeLabel).toUpperCase()) : null,
+        result.source ? e(Badge, { tone: "outline" }, String(result.source)) : null
       ),
       e("div", { className: "memory-ui-fact-content" }, result.text || ""),
       metadata ? e("div", { className: "memory-ui-tags" }, "metadata: ", metadata) : null,
@@ -793,9 +899,9 @@
           e("p", null, "Read-only view of the local Mnemosyne SQLite store, plus explicit recall and injected-context preview.")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
-          e(Badge, { variant: data.db_exists ? "outline" : "secondary" }, data.db_exists ? "db found" : "db missing"),
-          e(Badge, { variant: "outline" }, data.auto_sleep_enabled ? "sleep on" : "sleep off")
+          e(Badge, { tone: data.provider_configured ? "outline" : "secondary" }, data.provider_configured ? "active provider" : "not active"),
+          e(Badge, { tone: data.db_exists ? "outline" : "secondary" }, data.db_exists ? "db found" : "db missing"),
+          e(Badge, { tone: "outline" }, data.auto_sleep_enabled ? "sleep on" : "sleep off")
         )
       ),
       e("div", { className: "memory-ui-grid-4" },
@@ -925,7 +1031,7 @@
               e("p", { className: "memory-ui-muted" }, "Dashboard for Hermes built-in memory and active external memory providers.")
             ),
             e("div", { className: "memory-ui-badges" },
-              loading ? e(Badge, { variant: "secondary" }, "loading...") : null
+              loading ? e(Badge, { tone: "secondary" }, "loading...") : null
             )
           )
         ),
@@ -946,6 +1052,8 @@
       ),
       snapshot ? e(React.Fragment, null,
         e(BuiltinSection, { builtin: builtin }),
+        e(Separator, null),
+        e(SessionSearchSection, null),
         showHolographic ? e(React.Fragment, null,
           e(Separator, null),
           e(HolographicSection, { holographic: holographic, filters: filters, setFilters: setFilters, refresh: refresh })

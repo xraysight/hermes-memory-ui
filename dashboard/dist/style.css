@@ -1,7 +1,7 @@
 .memory-ui-page {
   display: flex;
   flex-direction: column;
-  gap: calc(1rem * var(--spacing-mul, 1));
+  gap: calc(1rem * var(--theme-spacing-mul, 1));
 }
 
 .memory-ui-hero {
@@ -11,7 +11,7 @@
 .memory-ui-section {
   display: flex;
   flex-direction: column;
-  gap: calc(0.85rem * var(--spacing-mul, 1));
+  gap: calc(0.85rem * var(--theme-spacing-mul, 1));
 }
 
 .memory-ui-section-header,
@@ -46,7 +46,7 @@
 .memory-ui-grid-2,
 .memory-ui-grid-4 {
   display: grid;
-  gap: calc(0.8rem * var(--spacing-mul, 1));
+  gap: calc(0.8rem * var(--theme-spacing-mul, 1));
 }
 
 .memory-ui-grid-1 {
@@ -99,7 +99,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--color-card-foreground, var(--color-foreground));
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
   font-size: 1.25rem;
   font-weight: 650;
 }
@@ -110,7 +111,7 @@
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-card), transparent 18%);
   color: var(--color-muted-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
   font-size: 0.72rem;
   padding: 0.5rem 0.65rem;
 }
@@ -143,15 +144,15 @@
 }
 
 .memory-ui-usage-ok {
-  background: var(--color-success, #22c55e);
+  background: var(--color-success);
 }
 
 .memory-ui-usage-warn {
-  background: var(--color-warning, #f59e0b);
+  background: var(--color-warning);
 }
 
 .memory-ui-usage-danger {
-  background: var(--color-destructive, #ef4444);
+  background: var(--color-destructive);
 }
 
 .memory-ui-entry-list,
@@ -166,6 +167,7 @@
 .memory-ui-fact {
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-card), transparent 10%);
+  color: var(--color-card-foreground, var(--color-foreground));
   padding: 0.75rem;
 }
 
@@ -178,7 +180,7 @@
 .memory-ui-entry-index,
 .memory-ui-fact-id {
   color: var(--color-muted-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
   font-size: 0.74rem;
 }
 
@@ -204,18 +206,18 @@
   border-radius: 999px;
   border: 1px solid var(--color-border);
   padding: 0.1rem 0.45rem;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
   font-size: 0.72rem;
 }
 
 .memory-ui-trust-high {
-  color: var(--color-success, #22c55e);
-  border-color: color-mix(in srgb, var(--color-success, #22c55e), transparent 40%);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success), transparent 40%);
 }
 
 .memory-ui-trust-mid {
-  color: var(--color-warning, #f59e0b);
-  border-color: color-mix(in srgb, var(--color-warning, #f59e0b), transparent 40%);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning), transparent 40%);
 }
 
 .memory-ui-trust-low {
@@ -225,7 +227,7 @@
 .memory-ui-tags {
   margin-top: 0.5rem;
   color: var(--color-muted-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
   font-size: 0.75rem;
 }
 
@@ -247,6 +249,10 @@
 
 .memory-ui-provider-controls {
   grid-template-columns: minmax(220px, 1fr) minmax(110px, 0.2fr) minmax(110px, 0.2fr) auto;
+}
+
+.memory-ui-session-controls {
+  grid-template-columns: minmax(220px, 1fr) minmax(130px, 0.28fr) auto;
 }
 
 .memory-ui-hindsight-actions,
@@ -306,8 +312,8 @@
   min-height: 2.35rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius, 0.5rem);
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--color-popover, var(--color-background));
+  color: var(--color-popover-foreground, var(--color-foreground));
   padding: 0 0.65rem;
 }
 
@@ -325,9 +331,9 @@
 
 .memory-ui-error {
   border-style: solid;
-  border-color: color-mix(in srgb, var(--color-destructive, #ef4444), transparent 30%);
-  color: var(--color-destructive, #ef4444);
-  background: color-mix(in srgb, var(--color-destructive, #ef4444), transparent 92%);
+  border-color: color-mix(in srgb, var(--color-destructive), transparent 30%);
+  color: var(--color-destructive);
+  background: color-mix(in srgb, var(--color-destructive), transparent 92%);
 }
 
 .memory-ui-link-button {
