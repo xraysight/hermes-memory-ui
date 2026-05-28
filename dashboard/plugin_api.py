@@ -716,7 +716,9 @@ def _list_honcho_conclusions(
             page = scope.list(page=1, size=limit)
         if hasattr(page, "items") and hasattr(page, "total"):
             raw_items = list(page.items or [])
-            total = int(getattr(page, "total", 0) or 0)
+            # Fallback when total is missing or None — guard against
+            # backends that report 0/None despite having items.
+            total = int(getattr(page, "total", None) or len(raw_items))
         else:
             raw_items = list(page or [])
             total = len(raw_items)

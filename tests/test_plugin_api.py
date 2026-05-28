@@ -194,6 +194,113 @@ def install_fake_honcho_client(monkeypatch, tmp_path, calls):
     monkeypatch.setitem(sys.modules, "plugins.memory.honcho.client", fake_client)
 
 
+# --- Regression tests for _list_honcho_conclusions -------------------------
+#
+# The dashboard used to render `len(conclusions)` as if it were the database
+# total. These tests pin the contract that:
+#   1. SyncPage-like objects with `.items` and `.total` surface `.total`.
+#   2. Plain-list fallback paths report `len(items)`.
+#   3. The function uses the page's items as-is and does not iterate or
+#      fetch additional pages (no surprise N+1 calls against the SDK).
+
+
+class _FakeSyncPage:
+    """Minimal stand-in for honcho.pagination.SyncPage."""
+
+    def __init__(self, items, total):
+        self.items = items
+        self.total = total
+
+
+def _make_observer_peer(returned_page, calls):
+    """Build a fake observer peer whose `conclusions_of(...).list(...)`
+    returns ``returned_page`` and records every call into ``calls``."""
+
+    class _Scope:
+        def __init__(self, target):
+            self.target = target
+
+        def list(self, page=1, size=50, reverse=False, **kwargs):
+            calls.append(("list", self.target, page, size, reverse))
+            return returned_page
+
+    class _Observer:
+        def conclusions_of(self, target):
+            calls.append(("conclusions_of", target))
+            return _Scope(target)
+
+    return _Observer()
+
+
+def _conclusion(idx, created_at="2026-01-01T00:00:00Z"):
+    return types.SimpleNamespace(
+        id=f"c-{idx}",
+        content=f"conclusion {idx}",
+        created_at=created_at,
+    )
+
+
+def test_list_honcho_conclusions_uses_syncpage_total(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    page = _FakeSyncPage(items=[_conclusion(1), _conclusion(2)], total=2076)
+    calls = []
+    observer = _make_observer_peer(page, calls)
+
+    items, total = module._list_honcho_conclusions(observer, "xraysight", limit=50)
+
+    assert total == 2076
+    assert len(items) == 2
+    assert [c["content"] for c in items] == ["conclusion 1", "conclusion 2"]
+    # Only one page request — no accidental pagination loop.
+    list_calls = [c for c in calls if c[0] == "list"]
+    assert len(list_calls) == 1
+
+
+def test_list_honcho_conclusions_falls_back_to_len_items(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    # Plain list — no `.items` / `.total` attributes; older SDK shape.
+    plain = [_conclusion(1), _conclusion(2), _conclusion(3)]
+    calls = []
+    observer = _make_observer_peer(plain, calls)
+
+    items, total = module._list_honcho_conclusions(observer, "xraysight", limit=50)
+
+    assert total == 3
+    assert len(items) == 3
+    list_calls = [c for c in calls if c[0] == "list"]
+    assert len(list_calls) == 1
+
+
+def test_list_honcho_conclusions_falls_back_when_total_is_none(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    # SyncPage with `total=None` despite non-empty items — guard against
+    # backends that omit pagination metadata.
+    page = _FakeSyncPage(items=[_conclusion(1), _conclusion(2)], total=None)
+    calls = []
+    observer = _make_observer_peer(page, calls)
+
+    items, total = module._list_honcho_conclusions(observer, "xraysight", limit=50)
+
+    assert total == 2  # not 0
+    assert len(items) == 2
+
+
+def test_list_honcho_conclusions_does_not_fetch_extra_pages(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    # Even when total >> page size, the function must use only the page
+    # items it was given, not call .list() repeatedly.
+    page = _FakeSyncPage(items=[_conclusion(i) for i in range(50)], total=2076)
+    calls = []
+    observer = _make_observer_peer(page, calls)
+
+    items, total = module._list_honcho_conclusions(observer, "xraysight", limit=50)
+
+    assert total == 2076
+    assert len(items) == 50
+    list_calls = [c for c in calls if c[0] == "list"]
+    assert len(list_calls) == 1, f"expected single page fetch, got {list_calls}"
+
+
 def test_honcho_payload_hides_api_key_and_fetches_peer_context(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: honcho\n", encoding="utf-8")
     (tmp_path / "honcho.json").write_text(json.dumps({"apiKey": "honcho-secret"}), encoding="utf-8")
