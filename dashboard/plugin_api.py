@@ -59,6 +59,12 @@ MAX_SESSION_SEARCH_LIMIT = 10
 SESSION_SEARCH_SCAN_LIMIT = 50
 SESSION_SOURCE_ALIASES = {
     "api": "api-server",
+    "api-server": "api-server",
+    "cli": "cli",
+    "telegram": "telegram",
+    "cron": "cron",
+    "discord": "discord",
+    "web": "web",
 }
 HINDSIGHT_DEFAULT_CLOUD_URL = "https://api.hindsight.vectorize.io"
 HINDSIGHT_DEFAULT_LOCAL_URL = "http://localhost:8888"

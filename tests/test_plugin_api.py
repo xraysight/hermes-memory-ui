@@ -143,6 +143,26 @@ def test_session_search_payload_maps_api_source_to_api_server(monkeypatch, tmp_p
     assert db_calls[0]["source_filter"] == ["api-server"]
 
 
+def test_session_search_payload_normalizes_known_source_casing(monkeypatch, tmp_path):
+    db_calls = []
+
+    class FakeSessionDB:
+        def search_messages(self, **kwargs):
+            db_calls.append(kwargs)
+            return []
+
+    fake_hermes_state = types.ModuleType("hermes_state")
+    fake_hermes_state.SessionDB = FakeSessionDB
+    monkeypatch.setitem(sys.modules, "hermes_state", fake_hermes_state)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._session_search_payload(query="memory", source="Telegram")
+
+    assert payload["error"] is None
+    assert payload["source"] == "telegram"
+    assert db_calls[0]["source_filter"] == ["telegram"]
+
+
 def test_session_search_payload_preserves_custom_source_casing(monkeypatch, tmp_path):
     db_calls = []
 
