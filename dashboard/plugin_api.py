@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     from fastapi import APIRouter, Query
@@ -694,18 +694,43 @@ def _call_peer_context(peer_obj: Any, *, target: str, search: Optional[str], lim
     return {"representation": str(representation or ""), "card": card}
 
 
-def _list_honcho_conclusions(observer_peer: Any, target_peer_id: str, limit: int) -> List[Dict[str, Any]]:
+def _list_honcho_conclusions(
+    observer_peer: Any, target_peer_id: str, limit: int
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Return ``(newest-first conclusions, total count)``.
+
+    Honcho's Python SDK returns a ``SyncPage`` from
+    ``ConclusionScope.list(page, size)`` whose ``.total`` attribute reflects
+    the full population in the database, not just the current page. Surfacing
+    that total lets the dashboard show the real population (e.g. 2076)
+    instead of ``len(items)`` (which is bounded by ``MAX_HONCHO_LIMIT``).
+
+    Items are sorted newest-first defensively so the "showing N latest" hint
+    in the UI stays correct even if the SDK ever changes its default order.
+    """
     try:
         scope = observer_peer.conclusions_of(target_peer_id)
         try:
-            items = scope.list(page=1, size=limit, reverse=True)
+            page = scope.list(page=1, size=limit, reverse=True)
         except TypeError:
-            items = scope.list(page=1, size=limit)
-        if not isinstance(items, list):
-            items = list(items or [])
-        return [_normalize_honcho_conclusion(item, index) for index, item in enumerate(items[:limit])]
+            page = scope.list(page=1, size=limit)
+        if hasattr(page, "items") and hasattr(page, "total"):
+            raw_items = list(page.items or [])
+            total = int(getattr(page, "total", 0) or 0)
+        else:
+            raw_items = list(page or [])
+            total = len(raw_items)
+        normalized = [
+            _normalize_honcho_conclusion(item, index)
+            for index, item in enumerate(raw_items[:limit])
+        ]
+        try:
+            normalized.sort(key=lambda c: c.get("created_at") or "", reverse=True)
+        except Exception:
+            pass
+        return normalized, total
     except Exception:
-        return []
+        return [], 0
 
 
 def _honcho_search_results(base: Dict[str, Any], search: Optional[str], limit: int) -> List[Dict[str, Any]]:
@@ -787,8 +812,8 @@ def _honcho_payload(
         "ai_observe_me": honcho_cfg["ai_observe_me"],
         "ai_observe_others": honcho_cfg["ai_observe_others"],
         "explicitly_configured": honcho_cfg["explicitly_configured"],
-        "user": {"peer_id": honcho_cfg["user_peer"], "card": [], "representation": "", "conclusions": []},
-        "ai": {"peer_id": honcho_cfg["ai_peer"], "card": [], "representation": "", "conclusions": []},
+        "user": {"peer_id": honcho_cfg["user_peer"], "card": [], "representation": "", "conclusions": [], "total_conclusions": 0, "total_card_facts": 0},
+        "ai": {"peer_id": honcho_cfg["ai_peer"], "card": [], "representation": "", "conclusions": [], "total_conclusions": 0, "total_card_facts": 0},
         "search_results": [],
         "search_result_count": 0,
         "limit": limit,
@@ -813,8 +838,14 @@ def _honcho_payload(
         ai_peer_obj = client.peer(ai_peer_id)
         base["user"].update(_call_peer_context(user_peer_obj, target=user_peer_id, search=search, limit=limit))
         base["ai"].update(_call_peer_context(ai_peer_obj, target=ai_peer_id, search=search, limit=limit))
-        base["user"]["conclusions"] = _list_honcho_conclusions(ai_peer_obj, user_peer_id, limit)
-        base["ai"]["conclusions"] = _list_honcho_conclusions(ai_peer_obj, ai_peer_id, limit)
+        user_concs, user_total = _list_honcho_conclusions(ai_peer_obj, user_peer_id, limit)
+        ai_concs, ai_total = _list_honcho_conclusions(ai_peer_obj, ai_peer_id, limit)
+        base["user"]["conclusions"] = user_concs
+        base["user"]["total_conclusions"] = user_total
+        base["user"]["total_card_facts"] = len(base["user"].get("card") or [])
+        base["ai"]["conclusions"] = ai_concs
+        base["ai"]["total_conclusions"] = ai_total
+        base["ai"]["total_card_facts"] = len(base["ai"].get("card") or [])
         base["search_results"] = _honcho_search_results(base, search, limit)
         base["search_result_count"] = len(base["search_results"])
     except Exception as exc:
