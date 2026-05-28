@@ -21,7 +21,7 @@ def load_plugin_api(monkeypatch, tmp_path):
     return module
 
 
-def test_session_search_payload_uses_hermes_session_search_tool(monkeypatch, tmp_path):
+def test_session_search_payload_uses_hermes_session_search_tool_without_source(monkeypatch, tmp_path):
     calls = []
 
     fake_tools = types.ModuleType("tools")
@@ -58,13 +58,89 @@ def test_session_search_payload_uses_hermes_session_search_tool(monkeypatch, tmp
     monkeypatch.setitem(sys.modules, "tools.session_search_tool", fake_session_search_tool)
 
     module = load_plugin_api(monkeypatch, tmp_path)
-    payload = module._session_search_payload(query="memory", limit=99, sort="newest", source="telegram")
+    payload = module._session_search_payload(query="memory", limit=99, sort="newest")
 
     assert payload["error"] is None
-    assert payload["count"] == 1
-    assert payload["source"] == "telegram"
-    assert payload["results"][0]["session_id"] == "s2"
+    assert payload["count"] == 2
+    assert payload["source"] == ""
+    assert [item["session_id"] for item in payload["results"]] == ["s1", "s2"]
     assert calls == [{"query": "memory", "limit": 10, "sort": "newest", "role_filter": "user,assistant"}]
+
+
+def test_session_search_payload_uses_source_aware_db_search(monkeypatch, tmp_path):
+    db_calls = []
+
+    class FakeSessionDB:
+        def search_messages(self, **kwargs):
+            db_calls.append(("search_messages", kwargs))
+            return [{
+                "id": 43,
+                "session_id": "s2",
+                "role": "user",
+                "source": "telegram",
+                "model": "test-model",
+                "session_started": 123,
+                "snippet": "telegram result",
+            }]
+
+        def get_anchored_view(self, session_id, msg_id, window=5, bookend=3):
+            db_calls.append(("get_anchored_view", session_id, msg_id, window, bookend))
+            return {
+                "bookend_start": [],
+                "window": [{"id": msg_id, "role": "user", "content": "find memory from telegram"}],
+                "bookend_end": [],
+                "messages_before": 0,
+                "messages_after": 0,
+            }
+
+        def get_session(self, session_id):
+            db_calls.append(("get_session", session_id))
+            return {"source": "telegram", "title": "Telegram memory UI work", "started_at": 123, "model": "test-model"}
+
+    fake_hermes_state = types.ModuleType("hermes_state")
+    fake_hermes_state.SessionDB = FakeSessionDB
+    monkeypatch.setitem(sys.modules, "hermes_state", fake_hermes_state)
+
+    fake_tools = types.ModuleType("tools")
+    fake_session_search_tool = types.ModuleType("tools.session_search_tool")
+    fake_session_search_tool._resolve_to_parent = lambda _db, session_id: session_id
+    fake_session_search_tool._format_timestamp = lambda value: f"ts:{value}"
+    monkeypatch.setitem(sys.modules, "tools", fake_tools)
+    monkeypatch.setitem(sys.modules, "tools.session_search_tool", fake_session_search_tool)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._session_search_payload(query="memory", limit=3, sort="newest", source="telegram")
+
+    assert payload["error"] is None
+    assert payload["source"] == "telegram"
+    assert payload["count"] == 1
+    assert payload["results"][0]["session_id"] == "s2"
+    assert payload["results"][0]["source"] == "telegram"
+    assert payload["results"][0]["messages"][0]["anchor"] is True
+    search_call = db_calls[0]
+    assert search_call[0] == "search_messages"
+    assert search_call[1]["source_filter"] == ["telegram"]
+    assert search_call[1]["limit"] == module.SESSION_SEARCH_SCAN_LIMIT
+
+
+def test_session_search_payload_maps_api_source_to_api_server(monkeypatch, tmp_path):
+    db_calls = []
+
+    class FakeSessionDB:
+        def search_messages(self, **kwargs):
+            db_calls.append(kwargs)
+            return []
+
+    fake_hermes_state = types.ModuleType("hermes_state")
+    fake_hermes_state.SessionDB = FakeSessionDB
+    monkeypatch.setitem(sys.modules, "hermes_state", fake_hermes_state)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._session_search_payload(query="memory", source="api")
+
+    assert payload["error"] is None
+    assert payload["source"] == "api-server"
+    assert db_calls[0]["source_filter"] == ["api-server"]
 
 
 def test_mem0_config_hides_api_key_and_uses_memory_client(monkeypatch, tmp_path):

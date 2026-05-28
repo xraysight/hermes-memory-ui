@@ -400,7 +400,7 @@ Query parameters:
 - `query`: required search query
 - `limit`: 1-10, default 3
 - `sort`: `newest` or `oldest`, default `newest`
-- `source`: optional exact source/type filter, e.g. `cli`, `telegram`, `cron`, `discord`, `web`, or `api`
+- `source`: optional exact source/type filter, e.g. `cli`, `telegram`, `cron`, `discord`, `web`, or `api-server` (`api` is accepted as an alias)
 
 Example:
 
