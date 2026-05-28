@@ -350,8 +350,8 @@
           e("div", { className: "memory-ui-muted" }, peer.peer_id || "—")
         ),
         e("div", { className: "memory-ui-badges" },
-          e(Badge, { variant: "outline" }, card.length + " card facts"),
-          e(Badge, { variant: "outline" }, conclusions.length + " conclusions")
+          e(Badge, { variant: "outline" }, ((peer.total_card_facts != null ? peer.total_card_facts : card.length)) + " card facts"),
+          e(Badge, { variant: "outline" }, ((peer.total_conclusions != null ? peer.total_conclusions : conclusions.length)) + " conclusions" + (peer.total_conclusions != null && peer.total_conclusions > conclusions.length ? " (showing " + conclusions.length + " latest)" : ""))
         )
       ),
       e(CardContent, null,
@@ -935,7 +935,7 @@
             e(StatCard, { label: "Built-in entries", value: builtin ? builtin.total_entries : 0, hint: "MEMORY.md + USER.md" }),
             showHolographic ? e(StatCard, { label: "Facts", value: holographic ? holographic.total_facts : 0, hint: "holographic facts" }) : null,
             showMem0 ? e(StatCard, { label: "Mem0", value: mem0 ? mem0.total_memories : 0, hint: "Mem0 memories" }) : null,
-            showHoncho ? e(StatCard, { label: "Honcho", value: honcho ? ((honcho.user.card || []).length + (honcho.ai.card || []).length) : 0, hint: "peer card facts" }) : null,
+            showHoncho ? e(StatCard, { label: "Honcho", value: honcho ? (((honcho.user.total_conclusions != null ? honcho.user.total_conclusions : (honcho.user.conclusions || []).length)) + ((honcho.ai.total_conclusions != null ? honcho.ai.total_conclusions : (honcho.ai.conclusions || []).length))) : 0, hint: "total conclusions" }) : null,
             showMnemosyne ? e(StatCard, { label: "Mnemosyne", value: mnemosyne ? (mnemosyne.total_memories || 0) : 0, hint: "local episodes" }) : null,
             showByteRover ? e(StatCard, { label: "ByteRover", value: byterover && byterover.project_exists ? "active" : "configured", hint: "search/query memory" }) : null,
             showHindsight ? e(StatCard, { label: "Hindsight", value: hindsight ? (hindsight.bank_id || "active") : "—", hint: "query-only memory" }) : null,
