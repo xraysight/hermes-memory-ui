@@ -37,7 +37,7 @@ except Exception:  # Allows local syntax/import tests outside the dashboard.
 
 router = APIRouter()
 
-PLUGIN_VERSION = "0.5.2"
+PLUGIN_VERSION = "0.5.3"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
@@ -56,6 +56,10 @@ MAX_BYTEROVER_LIMIT = 50
 DEFAULT_BYTEROVER_QUERY_TIMEOUT = 60
 DEFAULT_SESSION_SEARCH_LIMIT = 3
 MAX_SESSION_SEARCH_LIMIT = 10
+SESSION_SEARCH_SCAN_LIMIT = 50
+SESSION_SOURCE_ALIASES = {
+    "api": "api-server",
+}
 HINDSIGHT_DEFAULT_CLOUD_URL = "https://api.hindsight.vectorize.io"
 HINDSIGHT_DEFAULT_LOCAL_URL = "http://localhost:8888"
 VALID_HINDSIGHT_BUDGETS = {"low", "mid", "high"}
@@ -271,6 +275,115 @@ def _builtin_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     }
 
 
+def _canonical_session_source(source: str) -> str:
+    """Return the canonical Hermes session source for dashboard filter values."""
+    source = source.strip().casefold() if isinstance(source, str) else ""
+    return SESSION_SOURCE_ALIASES.get(source, source)
+
+
+def _shape_session_message(message: Dict[str, Any], anchor_id: Optional[int] = None) -> Dict[str, Any]:
+    entry = {
+        "id": message.get("id"),
+        "role": message.get("role"),
+        "content": message.get("content"),
+        "timestamp": message.get("timestamp"),
+    }
+    if message.get("tool_name"):
+        entry["tool_name"] = message.get("tool_name")
+    if message.get("tool_calls"):
+        entry["tool_calls"] = message.get("tool_calls")
+    if message.get("tool_call_id"):
+        entry["tool_call_id"] = message.get("tool_call_id")
+    if anchor_id is not None and message.get("id") == anchor_id:
+        entry["anchor"] = True
+    return {key: value for key, value in entry.items() if value is not None or key == "content"}
+
+
+def _format_session_timestamp(value: Any) -> str:
+    try:
+        from tools.session_search_tool import _format_timestamp  # type: ignore
+
+        return _format_timestamp(value)
+    except Exception:
+        return str(value or "unknown")
+
+
+def _session_lineage_root(db: Any, session_id: str) -> str:
+    try:
+        from tools.session_search_tool import _resolve_to_parent  # type: ignore
+
+        return _resolve_to_parent(db, session_id)
+    except Exception:
+        return session_id
+
+
+def _source_filtered_session_search(query: str, *, source: str, limit: int, sort: str) -> Dict[str, Any]:
+    """Run source-aware session search without post-filtering a capped global result set."""
+    from hermes_state import SessionDB  # type: ignore
+
+    db = SessionDB()
+    raw_results = db.search_messages(
+        query=query,
+        source_filter=[source],
+        exclude_sources=["tool"],
+        role_filter=["user", "assistant"],
+        limit=SESSION_SEARCH_SCAN_LIMIT,
+        offset=0,
+        sort=sort,
+    ) or []
+    seen_sessions: Dict[str, Dict[str, Any]] = {}
+    for row in raw_results:
+        raw_sid = row.get("session_id") or ""
+        lineage_root = _session_lineage_root(db, raw_sid)
+        if lineage_root not in seen_sessions:
+            item = dict(row)
+            item["_lineage_root"] = lineage_root
+            seen_sessions[lineage_root] = item
+        if len(seen_sessions) >= limit:
+            break
+
+    results: List[Dict[str, Any]] = []
+    for lineage_root, match_info in seen_sessions.items():
+        hit_sid = match_info.get("session_id") or lineage_root
+        msg_id = match_info.get("id")
+        try:
+            view = db.get_anchored_view(hit_sid, msg_id, window=5, bookend=3)
+        except Exception:
+            continue
+        try:
+            session_meta = db.get_session(lineage_root) or {}
+        except Exception:
+            session_meta = {}
+        entry: Dict[str, Any] = {
+            "session_id": hit_sid,
+            "when": _format_session_timestamp(session_meta.get("started_at") or match_info.get("session_started")),
+            "source": session_meta.get("source") or match_info.get("source") or source,
+            "model": session_meta.get("model") or match_info.get("model") or "unknown",
+            "title": session_meta.get("title") or None,
+            "matched_role": match_info.get("role"),
+            "match_message_id": msg_id,
+            "snippet": match_info.get("snippet") or "",
+            "bookend_start": [_shape_session_message(message) for message in (view.get("bookend_start") or [])],
+            "messages": [_shape_session_message(message, anchor_id=msg_id) for message in (view.get("window") or [])],
+            "bookend_end": [_shape_session_message(message) for message in (view.get("bookend_end") or [])],
+            "messages_before": view.get("messages_before", 0),
+            "messages_after": view.get("messages_after", 0),
+        }
+        if lineage_root and lineage_root != hit_sid:
+            entry["parent_session_id"] = lineage_root
+        results.append(entry)
+
+    return {
+        "success": True,
+        "mode": "discover",
+        "query": query,
+        "results": results,
+        "count": len(results),
+        "sessions_searched": len(seen_sessions),
+        "raw_matches_scanned": len(raw_results),
+    }
+
+
 def _session_search_payload(
     *,
     query: Optional[str],
@@ -280,7 +393,7 @@ def _session_search_payload(
 ) -> Dict[str, Any]:
     """Run Hermes session_search as an explicit read-only dashboard action."""
     query = query.strip() if isinstance(query, str) and query.strip() else ""
-    source = source.strip() if isinstance(source, str) and source.strip() else ""
+    source = _canonical_session_source(source) if isinstance(source, str) and source.strip() else ""
     try:
         limit = int(limit or DEFAULT_SESSION_SEARCH_LIMIT)
     except Exception:
@@ -306,11 +419,13 @@ def _session_search_payload(
         base["error"] = "Query is required for session search."
         return base
     try:
-        from tools.session_search_tool import session_search as run_session_search  # type: ignore
+        if source:
+            data = _source_filtered_session_search(query, source=source, limit=limit, sort=sort)
+        else:
+            from tools.session_search_tool import session_search as run_session_search  # type: ignore
 
-        search_limit = MAX_SESSION_SEARCH_LIMIT if source else limit
-        raw = run_session_search(query=query, limit=search_limit, sort=sort, role_filter="user,assistant")
-        data = json.loads(raw) if isinstance(raw, str) else raw
+            raw = run_session_search(query=query, limit=limit, sort=sort, role_filter="user,assistant")
+            data = json.loads(raw) if isinstance(raw, str) else raw
         if not isinstance(data, dict):
             base["error"] = "Session search returned an unexpected response."
             return base
@@ -319,8 +434,6 @@ def _session_search_payload(
             return base
         results = data.get("results") if isinstance(data.get("results"), list) else []
         base["unfiltered_count"] = len(results)
-        if source:
-            results = [item for item in results if str(item.get("source") or "").casefold() == source.casefold()]
         results = results[:limit]
         base.update({
             "operation": data.get("mode") or "discover",

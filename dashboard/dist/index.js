@@ -214,7 +214,7 @@
             e("option", { value: "cron" }, "Cron"),
             e("option", { value: "discord" }, "Discord"),
             e("option", { value: "web" }, "Web"),
-            e("option", { value: "api" }, "API")
+            e("option", { value: "api-server" }, "API")
           )
         ),
         e("div", { className: "memory-ui-provider-actions" },
