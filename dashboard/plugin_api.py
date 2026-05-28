@@ -277,8 +277,10 @@ def _builtin_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 def _canonical_session_source(source: str) -> str:
     """Return the canonical Hermes session source for dashboard filter values."""
-    source = source.strip().casefold() if isinstance(source, str) else ""
-    return SESSION_SOURCE_ALIASES.get(source, source)
+    if not isinstance(source, str):
+        return ""
+    stripped_source = source.strip()
+    return SESSION_SOURCE_ALIASES.get(stripped_source.casefold(), stripped_source)
 
 
 def _shape_session_message(message: Dict[str, Any], anchor_id: Optional[int] = None) -> Dict[str, Any]:
