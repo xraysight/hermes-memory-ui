@@ -21,6 +21,52 @@ def load_plugin_api(monkeypatch, tmp_path):
     return module
 
 
+def test_session_search_payload_uses_hermes_session_search_tool(monkeypatch, tmp_path):
+    calls = []
+
+    fake_tools = types.ModuleType("tools")
+    fake_session_search_tool = types.ModuleType("tools.session_search_tool")
+
+    def fake_session_search(**kwargs):
+        calls.append(kwargs)
+        return json.dumps({
+            "success": True,
+            "mode": "discover",
+            "query": kwargs["query"],
+            "count": 2,
+            "results": [{
+                "session_id": "s1",
+                "title": "Memory UI work",
+                "when": "now",
+                "source": "cli",
+                "match_message_id": 42,
+                "snippet": "session search result",
+                "messages": [{"id": 42, "role": "user", "content": "find memory"}],
+            }, {
+                "session_id": "s2",
+                "title": "Telegram memory UI work",
+                "when": "now",
+                "source": "telegram",
+                "match_message_id": 43,
+                "snippet": "telegram result",
+                "messages": [{"id": 43, "role": "user", "content": "find memory from telegram"}],
+            }],
+        })
+
+    setattr(fake_session_search_tool, "session_search", fake_session_search)
+    monkeypatch.setitem(sys.modules, "tools", fake_tools)
+    monkeypatch.setitem(sys.modules, "tools.session_search_tool", fake_session_search_tool)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._session_search_payload(query="memory", limit=99, sort="newest", source="telegram")
+
+    assert payload["error"] is None
+    assert payload["count"] == 1
+    assert payload["source"] == "telegram"
+    assert payload["results"][0]["session_id"] == "s2"
+    assert calls == [{"query": "memory", "limit": 10, "sort": "newest", "role_filter": "user,assistant"}]
+
+
 def test_mem0_config_hides_api_key_and_uses_memory_client(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
     (tmp_path / "mem0.json").write_text(

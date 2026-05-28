@@ -37,7 +37,7 @@ except Exception:  # Allows local syntax/import tests outside the dashboard.
 
 router = APIRouter()
 
-PLUGIN_VERSION = "0.5.0"
+PLUGIN_VERSION = "0.5.2"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
@@ -54,6 +54,8 @@ MAX_MNEMOSYNE_LIMIT = 100
 DEFAULT_BYTEROVER_LIMIT = 10
 MAX_BYTEROVER_LIMIT = 50
 DEFAULT_BYTEROVER_QUERY_TIMEOUT = 60
+DEFAULT_SESSION_SEARCH_LIMIT = 3
+MAX_SESSION_SEARCH_LIMIT = 10
 HINDSIGHT_DEFAULT_CLOUD_URL = "https://api.hindsight.vectorize.io"
 HINDSIGHT_DEFAULT_LOCAL_URL = "http://localhost:8888"
 VALID_HINDSIGHT_BUDGETS = {"low", "mid", "high"}
@@ -267,6 +269,68 @@ def _builtin_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "total_entries": sum(s["entry_count"] for s in stores),
         "generated_at": time.time(),
     }
+
+
+def _session_search_payload(
+    *,
+    query: Optional[str],
+    limit: int = DEFAULT_SESSION_SEARCH_LIMIT,
+    sort: Optional[str] = "newest",
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run Hermes session_search as an explicit read-only dashboard action."""
+    query = query.strip() if isinstance(query, str) and query.strip() else ""
+    source = source.strip() if isinstance(source, str) and source.strip() else ""
+    try:
+        limit = int(limit or DEFAULT_SESSION_SEARCH_LIMIT)
+    except Exception:
+        limit = DEFAULT_SESSION_SEARCH_LIMIT
+    limit = max(1, min(limit, MAX_SESSION_SEARCH_LIMIT))
+    sort = sort if sort in {"newest", "oldest"} else "newest"
+
+    base: Dict[str, Any] = {
+        "id": "session_search",
+        "label": "Session search",
+        "mode": "read-only/query-only",
+        "query": query,
+        "source": source,
+        "limit": limit,
+        "sort": sort,
+        "results": [],
+        "count": 0,
+        "unfiltered_count": 0,
+        "error": None,
+        "generated_at": time.time(),
+    }
+    if not query:
+        base["error"] = "Query is required for session search."
+        return base
+    try:
+        from tools.session_search_tool import session_search as run_session_search  # type: ignore
+
+        search_limit = MAX_SESSION_SEARCH_LIMIT if source else limit
+        raw = run_session_search(query=query, limit=search_limit, sort=sort, role_filter="user,assistant")
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(data, dict):
+            base["error"] = "Session search returned an unexpected response."
+            return base
+        if data.get("success") is False:
+            base["error"] = _safe_error(data.get("error") or data.get("message") or "Session search failed.")
+            return base
+        results = data.get("results") if isinstance(data.get("results"), list) else []
+        base["unfiltered_count"] = len(results)
+        if source:
+            results = [item for item in results if str(item.get("source") or "").casefold() == source.casefold()]
+        results = results[:limit]
+        base.update({
+            "operation": data.get("mode") or "discover",
+            "results": results,
+            "count": len(results),
+            "message": data.get("message") or "",
+        })
+    except Exception as exc:
+        base["error"] = _safe_error(exc)
+    return base
 
 
 def _resolve_holographic_db(config: Dict[str, Any]) -> Path:
@@ -2250,6 +2314,16 @@ async def status() -> Dict[str, Any]:
 @router.get("/builtin")
 async def builtin() -> Dict[str, Any]:
     return _builtin_payload()
+
+
+@router.get("/session-search")
+async def session_search_endpoint(
+    query: str = Query(...),
+    limit: int = Query(DEFAULT_SESSION_SEARCH_LIMIT, ge=1, le=MAX_SESSION_SEARCH_LIMIT),
+    sort: str = Query("newest"),
+    source: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    return _session_search_payload(query=query, limit=limit, sort=sort, source=source or None)
 
 
 @router.get("/holographic")
