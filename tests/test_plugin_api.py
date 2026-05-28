@@ -143,6 +143,26 @@ def test_session_search_payload_maps_api_source_to_api_server(monkeypatch, tmp_p
     assert db_calls[0]["source_filter"] == ["api-server"]
 
 
+def test_session_search_payload_preserves_custom_source_casing(monkeypatch, tmp_path):
+    db_calls = []
+
+    class FakeSessionDB:
+        def search_messages(self, **kwargs):
+            db_calls.append(kwargs)
+            return []
+
+    fake_hermes_state = types.ModuleType("hermes_state")
+    fake_hermes_state.SessionDB = FakeSessionDB
+    monkeypatch.setitem(sys.modules, "hermes_state", fake_hermes_state)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._session_search_payload(query="memory", source="Paperclip")
+
+    assert payload["error"] is None
+    assert payload["source"] == "Paperclip"
+    assert db_calls[0]["source_filter"] == ["Paperclip"]
+
+
 def test_mem0_config_hides_api_key_and_uses_memory_client(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
     (tmp_path / "mem0.json").write_text(
