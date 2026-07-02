@@ -33,6 +33,15 @@ Current scope:
 
 This plugin is intentionally read-only. It does not add, edit, replace, or remove memories. That is deliberate: writes should go through Hermes' `memory` and `fact_store` tools or provider classes so validation, locking, mirroring, FTS, HRR vectors, and memory-bank maintenance are preserved.
 
+## Companion X/Twitter Memory
+
+For social monitoring profiles, pair this dashboard with
+[Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet). Hermes Tweet can
+collect X/Twitter account, post, or trend context inside Hermes, while this
+memory UI helps inspect the saved campaign facts, audience constraints, and
+follow-up notes. Hermes Tweet is a third-party project maintained by Xquik-dev,
+not by this repository.
+
 ## Screenshots
 
 Built-in memory view:
