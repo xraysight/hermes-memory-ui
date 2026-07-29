@@ -1,6 +1,23 @@
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Editors and local environment
 .DS_Store
+.env
+
+# JavaScript and generated artifacts
 node_modules/
 dist/*.map
-.env
+build/
