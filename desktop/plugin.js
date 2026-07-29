@@ -25,10 +25,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 
 const VERSION = '0.6.0'
-const PLUGIN_ID = /* __PLUGIN_ID__ */ 'hermes-memory-ui'
-const PLUGIN_NAME = /* __PLUGIN_NAME__ */ 'Hermes Memory UI'
-const PLUGIN_ROUTE = /* __PLUGIN_ROUTE__ */ '/memory'
-export const PREVIEW_CATALOG = /* __PREVIEW_CATALOG__ */ null
+const PLUGIN_ID = 'hermes-memory-ui'
+const PLUGIN_NAME = 'Hermes Memory UI'
+const PLUGIN_ROUTE = '/memory'
 const PROVIDER_KEYS = ['holographic', 'mem0', 'honcho', 'mnemosyne', 'hindsight', 'byterover']
 const MUTED = { color: 'var(--ui-text-secondary)' }
 const BORDER = { borderColor: 'var(--ui-stroke-secondary)' }
@@ -334,27 +333,7 @@ export function buildProviderOperationOptions(provider, kind, controls = {}) {
   throw new Error(`Unsupported ${provider} operation: ${kind}`)
 }
 
-function previewResponse(previewCase, key) {
-  const response = previewCase?.operations?.[key]
-  return response === undefined
-    ? { error: `Preview fixture does not define ${key}.` }
-    : response
-}
-
-export function createMemoryApi(ctx, previewCase = null) {
-  if (previewCase) {
-    return {
-      getSnapshot: () => previewCase.snapshot,
-      searchSessions: () => previewResponse(previewCase, 'session_search'),
-      queryByteRover: () => previewResponse(previewCase, 'byterover_query'),
-      getHindsightContents: () => previewResponse(previewCase, 'hindsight_contents'),
-      recallHindsight: () => previewResponse(previewCase, 'hindsight_recall'),
-      reflectHindsight: () => previewResponse(previewCase, 'hindsight_reflect'),
-      getMnemosyneContents: () => previewResponse(previewCase, 'mnemosyne_contents'),
-      recallMnemosyne: () => previewResponse(previewCase, 'mnemosyne_recall'),
-      prefetchMnemosyne: () => previewResponse(previewCase, 'mnemosyne_prefetch')
-    }
-  }
+export function createMemoryApi(ctx) {
   const get = (path, params, timeoutMs) => ctx.rest(makePath(path, params), { timeoutMs })
   return {
     getSnapshot: (filters = {}) => {
@@ -470,34 +449,6 @@ function NativeSelect({ value, onValueChange, placeholder, options }) {
         }, String(option.value)))
       })
     ]
-  })
-}
-
-function PreviewCaseSelector({ catalog, value, onValueChange }) {
-  return jsx(Card, {
-    className: 'border-dashed',
-    children: jsx(CardContent, {
-      className: 'flex flex-wrap items-end gap-3 p-4',
-      children: jsxs(Fragment, {
-        children: [
-          jsx(Field, {
-            className: 'min-w-[16rem]',
-            label: 'Development preview fixture',
-            children: jsx(NativeSelect, {
-              value,
-              onValueChange,
-              placeholder: 'Select a fixture',
-              options: list(catalog?.cases).map(item => ({ value: item.id, label: item.label }))
-            })
-          }),
-          jsx('p', {
-            className: 'min-w-[16rem] flex-[2] text-xs',
-            style: MUTED,
-            children: list(catalog?.cases).find(item => item.id === value)?.description || ''
-          })
-        ]
-      })
-    })
   })
 }
 
@@ -1724,18 +1675,12 @@ function SessionSearch({ api, t }) {
 
 function MemoryPage({ ctx }) {
   const t = usePluginI18n(PLUGIN_ID)
-  const initialPreviewCaseId = PREVIEW_CATALOG?.cases?.[0]?.id || ''
-  const [previewCaseId, setPreviewCaseId] = useState(initialPreviewCaseId)
-  const previewCase = useMemo(
-    () => list(PREVIEW_CATALOG?.cases).find(item => item.id === previewCaseId) || null,
-    [previewCaseId]
-  )
-  const api = useMemo(() => createMemoryApi(ctx, previewCase), [ctx, previewCase])
+  const api = useMemo(() => createMemoryApi(ctx), [ctx])
   const initialFilters = normalizeSnapshotFilters()
   const [filters, setFilters] = useState(initialFilters)
   const [appliedFilters, setAppliedFilters] = useState(initialFilters)
   const snapshot = useQuery({
-    queryKey: [PLUGIN_ID, 'snapshot', previewCaseId, appliedFilters.limit, appliedFilters.minTrust, appliedFilters.category, appliedFilters.search],
+    queryKey: [PLUGIN_ID, 'snapshot', appliedFilters.limit, appliedFilters.minTrust, appliedFilters.category, appliedFilters.search],
     queryFn: () => api.getSnapshot(appliedFilters),
     staleTime: 10_000
   })
@@ -1762,13 +1707,6 @@ function MemoryPage({ ctx }) {
       style: { boxSizing: 'border-box', maxWidth: '80rem', minWidth: 0 },
       children: jsxs(Fragment, {
         children: [
-          PREVIEW_CATALOG
-            ? jsx(PreviewCaseSelector, {
-              catalog: PREVIEW_CATALOG,
-              value: previewCaseId,
-              onValueChange: setPreviewCaseId
-            })
-            : null,
           snapshot.data
             ? jsx(Hero, { snapshot: snapshot.data, providers, t })
             : jsxs('header', {
@@ -1811,13 +1749,13 @@ function MemoryPage({ ctx }) {
                     snapshot: snapshot.data,
                     api,
                     t
-                  }, PREVIEW_CATALOG ? `${previewCaseId}:${provider}` : provider))
+                  }, provider))
                 })
                 : jsx(EmptyState, { title: t('noProviders') })
             ]
           }) : null,
           jsx(Separator, {}),
-          jsx(SessionSearch, { api, t }, PREVIEW_CATALOG ? previewCaseId : undefined)
+          jsx(SessionSearch, { api, t })
         ]
       })
     })
@@ -1826,8 +1764,8 @@ function MemoryPage({ ctx }) {
 
 function register(ctx) {
   ctx.i18n.register(bundles)
-  const navLabel = PREVIEW_CATALOG ? 'Memory Preview' : ctx.i18n.t('title')
-  const openLabel = PREVIEW_CATALOG ? 'Open Memory Preview' : ctx.i18n.t('openMemory')
+  const navLabel = ctx.i18n.t('title')
+  const openLabel = ctx.i18n.t('openMemory')
   ctx.register({
     id: 'page',
     area: ROUTES_AREA,
