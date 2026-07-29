@@ -1,0 +1,45 @@
+{
+  "id": "error",
+  "label": "All providers — errors",
+  "description": "Representative configuration, connection, database, CLI, and operation failures.",
+  "assertions": [
+    "Holographic database is locked",
+    "Mem0 request was rejected",
+    "Honcho service is unavailable",
+    "Mnemosyne database could not be opened",
+    "Hindsight daemon refused the connection",
+    "ByteRover index is unavailable",
+    "Session index could not be read"
+  ],
+  "snapshot": {
+    "plugin": "hermes-memory-ui",
+    "version": "0.6.0",
+    "mode": "read-only",
+    "generated_at": 1753783200,
+    "builtin": {
+      "hermes_home": "/home/demo/.hermes",
+      "generated_at": 1753783200,
+      "total_entries": 0,
+      "stores": [
+        {"id": "memory", "label": "Agent memory", "filename": "MEMORY.md", "path": "/home/demo/.hermes/memories/MEMORY.md", "exists": true, "entries": [], "entry_count": 0, "char_count": 0, "char_limit": 2200, "usage_percent": 0, "modified_at": null, "error": "MEMORY.md could not be decoded"},
+        {"id": "user", "label": "User profile", "filename": "USER.md", "path": "/home/demo/.hermes/memories/USER.md", "exists": false, "entries": [], "entry_count": 0, "char_count": 0, "char_limit": 1375, "usage_percent": 0, "modified_at": null, "error": null}
+      ]
+    },
+    "holographic": {"id": "holographic", "label": "Holographic memory", "provider_configured": true, "db_path": "/home/demo/.hermes/memory_store.db", "exists": true, "facts": [], "fact_count": 0, "total_facts": 0, "categories": [], "entities_count": 0, "memory_banks_count": 0, "limit": 100, "error": "Holographic database is locked", "generated_at": 1753783200},
+    "mem0": {"id": "mem0", "label": "Mem0 memory", "provider_configured": true, "mode": "read-only", "config_path": "/home/demo/.hermes/mem0.json", "config_exists": true, "api_key_present": true, "user_id": "demo-user", "agent_id": "hermes", "memories": [], "memory_count": 0, "total_memories": 0, "limit": 100, "search": "", "error": "Mem0 request was rejected with status 401", "generated_at": 1753783200},
+    "honcho": {"id": "honcho", "label": "Honcho memory", "provider_configured": true, "mode": "read-only", "config_path": "/home/demo/.hermes/honcho.json", "config_exists": true, "api_key_present": true, "base_url_present": false, "enabled": true, "host": "hermes", "workspace": "demo-workspace", "user_peer": "demo-user", "ai_peer": "hermes", "environment": "production", "recall_mode": "hybrid", "session_strategy": "per-directory", "user": {"peer_id": "demo-user", "card": [], "representation": "", "conclusions": [], "total_conclusions": 0, "total_card_facts": 0}, "ai": {"peer_id": "hermes", "card": [], "representation": "", "conclusions": [], "total_conclusions": 0, "total_card_facts": 0}, "search_results": [], "search_result_count": 0, "limit": 100, "search": "", "error": "Honcho service is unavailable", "generated_at": 1753783200},
+    "mnemosyne": {"id": "mnemosyne", "label": "Mnemosyne memory", "provider_configured": true, "mode": "read-only/query-only", "config_path": "/home/demo/.hermes/config.yaml", "data_dir": "/home/demo/.hermes/mnemosyne", "db_path": "/home/demo/.hermes/mnemosyne/mnemosyne.db", "db_exists": true, "prefetch_content_chars": "4000", "auto_sleep_enabled": true, "operation": "contents", "limit": 100, "search": "", "table_counts": {}, "memories": [], "memory_count": 0, "total_memories": 0, "facts": [], "fact_count": 0, "total_facts": 0, "vector_rows": 0, "error": "Mnemosyne database could not be opened", "generated_at": 1753783200},
+    "hindsight": {"id": "hindsight", "label": "Hindsight memory", "provider_configured": true, "config_path": "/home/demo/.hermes/hindsight/config.json", "config_exists": true, "mode": "local_embedded", "mode_label": "query-only", "api_key_present": false, "llm_key_present": true, "bank_id": "hermes-demo", "recall_budget": "mid", "memory_mode": "hybrid", "auto_retain": true, "auto_recall": true, "operation": "status", "query": "", "limit": 25, "results": [], "result_count": 0, "reflection": "", "error": "Hindsight daemon refused the connection", "generated_at": 1753783200},
+    "byterover": {"id": "byterover", "label": "ByteRover memory", "provider_configured": true, "mode": "read-only", "config_path": "/home/demo/.hermes/byterover.json", "config_exists": true, "brv_available": true, "brv_path": "/usr/local/bin/brv", "project_root": "/work/aurora", "project_exists": true, "search_scope": "project", "locations": [], "location_count": 0, "status": {}, "results": [], "result_count": 0, "total_found": 0, "search": "", "limit": 10, "error": "ByteRover index is unavailable", "generated_at": 1753783200}
+  },
+  "operations": {
+    "session_search": {"id": "session_search", "label": "Session search", "mode": "read-only/query-only", "query": "migration", "source": "", "limit": 3, "sort": "newest", "results": [], "count": 0, "unfiltered_count": 0, "error": "Session index could not be read", "generated_at": 1753783200},
+    "hindsight_contents": {"id": "hindsight", "operation": "contents", "memories": [], "documents": [], "error": "Hindsight contents request timed out"},
+    "hindsight_recall": {"id": "hindsight", "operation": "recall", "results": [], "error": "Hindsight recall request timed out"},
+    "hindsight_reflect": {"id": "hindsight", "operation": "reflect", "reflection": "", "error": "Hindsight reflect request timed out"},
+    "mnemosyne_contents": {"id": "mnemosyne", "operation": "contents", "memories": [], "facts": [], "error": "Mnemosyne contents query failed"},
+    "mnemosyne_recall": {"id": "mnemosyne", "operation": "recall", "results": [], "error": "Mnemosyne recall query failed"},
+    "mnemosyne_prefetch": {"id": "mnemosyne", "operation": "prefetch", "context": "", "error": "Mnemosyne prefetch query failed"},
+    "byterover_query": {"id": "byterover", "operation": "query", "answer": "", "matched_docs": [], "error": "ByteRover query command failed"}
+  }
+}

@@ -1,12 +1,12 @@
-"""Hermes Memory UI dashboard plugin backend.
+"""Hermes Memory UI shared Dashboard and Desktop plugin backend.
 
-Mounted by Hermes dashboard at /api/plugins/hermes-memory-ui/.
+Mounted by Hermes at /api/plugins/hermes-memory-ui/.
 
-Read-only inspection covers built-in memory files, holographic memory,
-Mem0, Honcho, and Hindsight provider state. No mutation endpoints are exposed
-intentionally. Memory writes should go through Hermes' memory/fact_store
-tools or provider classes so validation, locking, FTS/HRR maintenance,
-and provider-specific semantics are preserved.
+Read-only inspection covers built-in memory files, holographic memory, Mem0,
+Honcho, Mnemosyne, Hindsight, and ByteRover provider state. No mutation
+endpoints are exposed intentionally. Memory writes should go through Hermes'
+memory/fact_store tools or provider classes so validation, locking, FTS/HRR
+maintenance, and provider-specific semantics are preserved.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ except Exception:  # Allows local syntax/import tests outside the dashboard.
 
 router = APIRouter()
 
-PLUGIN_VERSION = "0.5.3"
+PLUGIN_VERSION = "0.6.0"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
@@ -85,6 +85,13 @@ SECRET_QUERY_KEYS = {
 }
 
 
+def _is_secret_query_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+    return normalized in SECRET_QUERY_KEYS or any(
+        part in SECRET_QUERY_KEYS for part in normalized.split("_")
+    )
+
+
 def _redact_url(value: str) -> str:
     """Redact URL userinfo and secret-looking query values before returning JSON."""
     try:
@@ -104,7 +111,7 @@ def _redact_url(value: str) -> str:
 
     query_parts = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
     redacted_query = urllib.parse.urlencode([
-        (key, REDACTED if key.lower() in SECRET_QUERY_KEYS else value)
+        (key, REDACTED if _is_secret_query_key(key) else value)
         for key, value in query_parts
     ]).replace("%5BREDACTED%5D", REDACTED)
     return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, redacted_query, parsed.fragment))
@@ -1535,16 +1542,11 @@ def _load_hindsight_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
     config = config if config is not None else _read_yaml(_hermes_home() / "config.yaml")
     home = _hermes_home()
     profile_path = home / "hindsight" / "config.json"
-    legacy_path = Path.home() / ".hindsight" / "config.json"
     file_cfg: Dict[str, Any] = {}
     config_path = profile_path
     config_exists = profile_path.exists()
     if config_exists:
         file_cfg = _read_json(profile_path)
-    elif legacy_path.exists():
-        config_path = legacy_path
-        config_exists = True
-        file_cfg = _read_json(legacy_path)
 
     mode = str(file_cfg.get("mode") or _env_value("HINDSIGHT_MODE", "cloud") or "cloud")
     if mode == "local":
@@ -1681,7 +1683,7 @@ def _ensure_hindsight_local_daemon(cfg: Dict[str, Any]) -> Optional[str]:
         return f"hindsight-embed command not found in dashboard environment; diagnostics={safe_diagnostics}"
     cmd = [binary, "-p", profile, "daemon", "start"]
     env = os.environ.copy()
-    env.setdefault("HERMES_HOME", str(_hermes_home()))
+    env["HERMES_HOME"] = str(_hermes_home())
     try:
         result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
     except FileNotFoundError:

@@ -645,6 +645,7 @@ def test_hindsight_local_daemon_uses_resolved_binary_when_path_is_constrained(mo
     module = load_plugin_api(monkeypatch, tmp_path)
     monkeypatch.setattr(module.sys, "executable", str(fake_executable))
     monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "stale-profile"))
 
     def fake_run(cmd, **kwargs):
         calls.append((cmd, kwargs))
@@ -655,6 +656,7 @@ def test_hindsight_local_daemon_uses_resolved_binary_when_path_is_constrained(mo
 
     assert module._ensure_hindsight_local_daemon(cfg) is None
     assert calls[0][0] == [str(fake_hindsight_embed), "-p", "test-profile", "daemon", "start"]
+    assert calls[0][1]["env"]["HERMES_HOME"] == str(tmp_path)
 
 
 def test_hindsight_local_daemon_reports_safe_diagnostics_when_binary_missing(monkeypatch, tmp_path):
@@ -700,6 +702,52 @@ def test_hindsight_api_url_is_redacted_in_public_payloads(monkeypatch, tmp_path)
     assert "url-secret" not in dumped
     assert "tok-secret" not in dumped
     assert "hindsight-secret" not in dumped
+
+
+def test_hindsight_api_url_redacts_hyphenated_secret_query_keys(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    redacted = module._redact_url(
+        "https://example.test/v1?api-key=first&client-secret=second&access-token=third&debug=true"
+    )
+
+    assert redacted == (
+        "https://example.test/v1?api-key=[REDACTED]&client-secret=[REDACTED]"
+        "&access-token=[REDACTED]&debug=true"
+    )
+
+
+def test_hindsight_api_url_redacts_prefixed_secret_query_keys(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    redacted = module._redact_url(
+        "https://example.test/v1?x-api-key=first&oauth-token=second&debug=true"
+    )
+
+    assert redacted == (
+        "https://example.test/v1?x-api-key=[REDACTED]&oauth-token=[REDACTED]&debug=true"
+    )
+
+
+def test_hindsight_config_does_not_fall_back_outside_active_profile(monkeypatch, tmp_path):
+    system_home = tmp_path / "system-home"
+    legacy_path = system_home / ".hindsight" / "config.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        json.dumps({"apiKey": "other-profile-secret", "bank_id": "other-profile-bank"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(system_home))
+
+    active_profile = tmp_path / "active-profile"
+    active_profile.mkdir()
+    module = load_plugin_api(monkeypatch, active_profile)
+    config = module._load_hindsight_config()
+
+    assert config["config_path"] == str(active_profile / "hindsight" / "config.json")
+    assert config["config_exists"] is False
+    assert config["bank_id"] == "hermes"
+    assert "other-profile-secret" not in json.dumps(config)
 
 
 def test_hindsight_recall_and_reflect_use_provider_without_retain(monkeypatch, tmp_path):

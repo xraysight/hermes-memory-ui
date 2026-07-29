@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.11.16"
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Check committed whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            git diff --check "$BASE_SHA"...HEAD
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --check HEAD^ HEAD
+          else
+            git diff-tree --check --root --no-commit-id -r HEAD
+          fi
+
+      - name: Build Desktop fixture preview
+        run: uv run python scripts/build_desktop_preview.py
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check desktop/plugin.js
+          node --check build/desktop-preview/plugin.js
+
+      - name: Run Desktop VM harnesses
+        run: |
+          node --experimental-vm-modules tests/desktop_plugin_smoke.mjs desktop/plugin.js
+          node --experimental-vm-modules tests/desktop_plugin_render.mjs build/desktop-preview/plugin.js
+
+      - name: Run pytest
+        run: uv run --with pytest==9.1.1 --with pyyaml==6.0.3 python -m pytest -q

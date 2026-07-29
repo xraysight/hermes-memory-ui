@@ -1,6 +1,8 @@
 # Hermes Memory UI Plugin
 
-Dashboard plugin for inspecting [Hermes Agent](https://github.com/NousResearch/hermes-agent) memory.
+Read-only [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin for inspecting memory in Hermes Dashboard and Hermes Desktop.
+
+The Dashboard and Desktop interfaces are separate delivery artifacts. They share only the profile-aware Python backend API.
 
 Current scope:
 
@@ -35,6 +37,8 @@ This plugin is intentionally read-only. It does not add, edit, replace, or remov
 
 ## Screenshots
 
+Current screenshots show the Hermes Dashboard interface. The Hermes Desktop interface exposes the same memory sources through a native full-page view.
+
 Built-in memory view:
 
 ![Hermes Memory UI built-in memory view](docs/assets/hermes-memory-dashboard1.png)
@@ -65,14 +69,25 @@ Byterover memory view:
 
 ## Requirements
 
-- Hermes Agent with web dashboard support.
-- Dashboard plugin support as documented at:
-  `https://hermes-agent.nousresearch.com/docs/user-guide/features/extending-the-dashboard`
+- Hermes Agent with Hermes Dashboard or Hermes Desktop.
+- For Dashboard: [dashboard plugin support](https://hermes-agent.nousresearch.com/docs/user-guide/features/extending-the-dashboard).
+- For Desktop: [Hermes Desktop Plugin SDK](https://hermes-agent.nousresearch.com/docs/developer-guide/desktop-plugin-sdk).
 - Optional: external memory provider enabled.
 
 The built-in memory view works always, while external memory provider sections are shown only when configured.
 
+## Dashboard and Desktop delivery
+
+- `dashboard/` is a web Dashboard plugin with its own manifest, tracked browser bundle, and stylesheet.
+- `desktop/plugin.js` is a standalone, uncompiled ESM disk plugin. It imports only the Hermes Desktop SDK, React, and the JSX runtime; it does not require an npm build.
+- The Desktop plugin registers the `/memory` full-page route, a `Memory` sidebar item, and an `Open Memory` command-palette action.
+- Desktop requests use the plugin-scoped, profile-aware `ctx.rest` client. That client reaches the same `/api/plugins/hermes-memory-ui/` backend used by Dashboard.
+
+The Desktop UI and Python backend are enabled separately. The regular plugin must be installed and present in `plugins.enabled` so Hermes mounts `dashboard/plugin_api.py`; copying or enabling only the Desktop disk plugin is not sufficient.
+
 ## Installation
+
+The default profile lives at `~/.hermes`. A named profile lives at `~/.hermes/profiles/<name>`; use `hermes -p <name> ...` for plugin commands and set `HERMES_HOME="$HOME/.hermes/profiles/<name>"` for the copy commands below.
 
 ### Install directly from GitHub
 
@@ -80,22 +95,49 @@ The built-in memory view works always, while external memory provider sections a
 hermes plugins install xraysight/hermes-memory-ui --enable
 ```
 
+This installs and enables the shared backend plus the Dashboard interface.
+
+To enable the Hermes Desktop interface, copy the disk plugin to `$HERMES_HOME/desktop-plugins/hermes-memory-ui/plugin.js`:
+
+```bash
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$HERMES_HOME/desktop-plugins/hermes-memory-ui"
+cp "$HERMES_HOME/plugins/hermes-memory-ui/desktop/plugin.js" \
+  "$HERMES_HOME/desktop-plugins/hermes-memory-ui/plugin.js"
+```
+
+Hermes Desktop inventories the UI separately under `Settings → Plugins`; enable `Hermes Memory UI` there if it is disabled.
+
 ### Update existing installation
 
 ```bash
 hermes plugins update hermes-memory-ui
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$HERMES_HOME/desktop-plugins/hermes-memory-ui"
+cp "$HERMES_HOME/plugins/hermes-memory-ui/desktop/plugin.js" \
+  "$HERMES_HOME/desktop-plugins/hermes-memory-ui/plugin.js"
 ```
+
+The second copy step is required because Dashboard/general plugins and Desktop disk plugins use separate delivery directories.
 
 ### Install from a local checkout
 
 From this repository directory:
 
 ```bash
-mkdir -p "${HERMES_HOME:-$HOME/.hermes}/plugins/hermes-memory-ui"
-cp -R dashboard "${HERMES_HOME:-$HOME/.hermes}/plugins/hermes-memory-ui/"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$HERMES_HOME/plugins/hermes-memory-ui"
+cp plugin.yaml __init__.py "$HERMES_HOME/plugins/hermes-memory-ui/"
+cp -R dashboard "$HERMES_HOME/plugins/hermes-memory-ui/"
+mkdir -p "$HERMES_HOME/desktop-plugins/hermes-memory-ui"
+cp desktop/plugin.js "$HERMES_HOME/desktop-plugins/hermes-memory-ui/plugin.js"
 ```
 
-### Reload the dashboard
+Make sure `hermes-memory-ui` is enabled as a regular Hermes plugin so its Python backend can be mounted. The Desktop UI toggle does not enable backend code.
+
+### Reload the interfaces
+
+#### Dashboard
 
 If the dashboard is already running, force plugin discovery:
 
@@ -113,7 +155,72 @@ hermes dashboard
 
 or stop/start your existing dashboard process/service.
 
+#### Desktop
+
+Hermes Desktop watches its plugin directory and normally hot-reloads `plugin.js`. If the `Memory` navigation item does not appear, run `Reload desktop plugins` from the command palette and check `Settings → Plugins`.
+
+If it still fails to load, run `hermes logs gui -f`. If the Desktop UI loads but its scoped API calls return 404, restart the Hermes gateway after confirming that `hermes-memory-ui` is present in `plugins.enabled`; backend routes are mounted at gateway startup.
+
+### Development provider-fixture preview
+
+The preview plugin is development-only. It embeds synthetic provider responses, makes no live provider REST calls, and does not install, configure, enable, or mutate any memory provider. It has a separate `Memory Preview` route and can be installed alongside the production plugin.
+
+Build the deterministic single-file preview from `desktop/plugin.js` and the JSON cases in `tests/fixtures/providers`:
+
+```bash
+uv run python scripts/build_desktop_preview.py
+node --check build/desktop-preview/plugin.js
+```
+
+Install it for the default Hermes profile:
+
+```bash
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview"
+cp build/desktop-preview/plugin.js \
+  "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview/plugin.js"
+```
+
+In Hermes Desktop, open `Memory Preview` and use the `Development preview fixture` selector to switch among normal, empty, error, and long-content states. The Hindsight, Mnemosyne, ByteRover, and session-search controls return the selected case's fixture responses; they never query a live backend. If the page does not appear, run `Reload desktop plugins` from the command palette and enable `Hermes Memory UI Preview` under `Settings → Plugins`.
+
+Remove the preview without affecting the production plugin:
+
+```bash
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+rm -f "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview/plugin.js"
+rmdir "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview" 2>/dev/null || true
+```
+
+Generated files under `build/` are ignored by Git and should not be committed.
+
+## Development and repository layout
+
+- `desktop/` contains the production Desktop disk plugin source. Keep it as uncompiled ESM without JSX syntax or unsupported imports.
+- `dashboard/` contains the Dashboard manifest, shared Python API, and tracked `dist/` browser assets. `dashboard/dist/` is release content, not a disposable local build directory.
+- `scripts/` contains the deterministic Desktop fixture-preview builder.
+- `tests/fixtures/providers/` contains source JSON fixtures and must remain tracked. The Python tests and Node VM harnesses live directly under `tests/`.
+- `build/` is generated and ignored. `build/desktop-preview/plugin.js` is recreated from `desktop/plugin.js` plus the provider fixtures.
+
+Run the complete verification suite from the repository root:
+
+```bash
+git diff --check
+uv run python scripts/build_desktop_preview.py
+node --check desktop/plugin.js
+node --check build/desktop-preview/plugin.js
+node --experimental-vm-modules tests/desktop_plugin_smoke.mjs desktop/plugin.js
+node --experimental-vm-modules tests/desktop_plugin_render.mjs build/desktop-preview/plugin.js
+uv run --with pytest==9.1.1 --with pyyaml==6.0.3 python -m pytest -q
+```
+
 ## What the UI shows
+
+Both interfaces expose the same configured providers, snapshot filters, visible data, and explicit provider operations, although each uses controls native to its host:
+
+- Snapshot `search` and `limit` apply across providers; `category` and `min_trust` apply only to Holographic facts.
+- Hindsight exposes contents, recall, and reflect. Mnemosyne exposes contents, recall with temporal weight, and prefetch preview. ByteRover exposes snapshot search and explicit query/synthesis.
+- Session search is always user-triggered and supports a source filter. Desktop also exposes newest/oldest sorting; Dashboard currently submits newest-first.
+- Dashboard and Desktop both call the same query-only endpoints. Neither interface exposes provider retain, remember, curate, update, or delete operations.
 
 Top summary:
 
@@ -139,7 +246,7 @@ Session search section:
 
 - explicit query box for previous Hermes sessions
 - optional session type/source filter
-- newest-first results with snippets and short message context
+- results in the selected order (newest first by default) with snippets and short message context
 - no automatic search on page load and no memory writes
 
 Holographic memory section, displayed only when `memory.provider` is currently `holographic`:
@@ -187,7 +294,7 @@ Hindsight memory section, displayed when `memory.provider` is currently `hindsig
 - whether API/LLM keys are present, without exposing secrets
 - explicit `Recall` query button for ranked memory retrieval
 - explicit `Reflect` query button for synthesis over memories
-- automatically displayed Hindsight contents with a `Refresh` button for extracted memory units plus retained source documents
+- automatically displayed Hindsight contents with a manual reload action for extracted memory units plus retained source documents
 - no retain/write endpoint
 
 ByteRover memory section, displayed when `memory.provider` is currently `byterover`:
@@ -265,7 +372,9 @@ Honcho support follows Hermes' bundled `honcho` memory provider convention and r
 - `~/.honcho/config.json`
 - environment variables such as `HONCHO_API_KEY`, `HONCHO_BASE_URL`, and `HONCHO_ENVIRONMENT`
 
-Honcho is a workspace/peer/session memory system rather than a flat memory list. The dashboard therefore shows peer cards, representations, conclusions, and context search rather than claiming a complete list of all memories. The API key is only used server-side through Hermes' Honcho provider helpers; it is never returned in plugin responses.
+This fallback order is intentional in Hermes' Honcho provider contract. For named profiles, Hermes derives a profile-specific Honcho host key and selects its matching host block; the UI mirrors that resolution instead of imposing different path rules. A profile-local `$HERMES_HOME/honcho.json` still has highest priority.
+
+Honcho is a workspace/peer/session memory system rather than a flat memory list. The UI therefore shows peer cards, representations, conclusions, and context search rather than claiming a complete list of all memories. The API key is only used server-side through Hermes' Honcho provider helpers; it is never returned in plugin responses.
 
 The plugin performs read-only calls such as:
 
@@ -286,7 +395,7 @@ Mnemosyne support follows Hermes' Mnemosyne memory provider convention. The plug
 - optional `memory.mnemosyne.data_dir` / `memory.mnemosyne.db_path`
 - optional environment variables such as `MNEMOSYNE_DATA_DIR`, `MNEMOSYNE_DB_PATH`, `MNEMOSYNE_PREFETCH_CONTENT_CHARS`, and `MNEMOSYNE_AUTO_SLEEP_ENABLED`
 
-The SQLite connection is opened in read-only mode using `mode=ro`. The dashboard reads ordinary text tables such as `episodic_memory`, `memoria_facts`, `memoria_instructions`, `memoria_preferences`, `memoria_timelines`, `gists`, and `triples`. It deliberately does not query sqlite-vec virtual tables directly; it only counts their rowid side tables when present so the UI works without loading sqlite-vec into the dashboard process.
+The SQLite connection is opened in read-only mode using `mode=ro`. The backend reads ordinary text tables such as `episodic_memory`, `memoria_facts`, `memoria_instructions`, `memoria_preferences`, `memoria_timelines`, `gists`, and `triples`. It deliberately does not query sqlite-vec virtual tables directly; it only counts their rowid side tables when present so the UI works without loading sqlite-vec into the serving Hermes process.
 
 The plugin performs query-only provider calls:
 
@@ -301,7 +410,6 @@ It does not expose `mnemosyne_remember`, `mnemosyne_sleep`, `mnemosyne_update`, 
 Hindsight support follows Hermes' bundled `hindsight` memory provider convention. The plugin reads non-secret configuration from:
 
 - `$HERMES_HOME/hindsight/config.json`
-- legacy `~/.hindsight/config.json`
 - environment variables such as `HINDSIGHT_MODE`, `HINDSIGHT_API_URL`, `HINDSIGHT_DAEMON_URL`, `HINDSIGHT_BANK_ID`, and `HINDSIGHT_BUDGET`
 
 The daemon/API endpoint is resolved with this precedence:
@@ -310,11 +418,13 @@ The daemon/API endpoint is resolved with this precedence:
 hindsight/config.json api_url > HINDSIGHT_API_URL > HINDSIGHT_DAEMON_URL > default
 ```
 
-For `local_embedded`, the default endpoint is `http://localhost:8888`. If the resolved endpoint is remote, for example `HINDSIGHT_DAEMON_URL=http://192.168.42.20:8888`, the dashboard treats that daemon as authoritative and does not try to start `hindsight-embed daemon start` on the dashboard host. Local daemon startup is attempted only for `localhost`, `127.0.0.1`, or `::1` endpoints.
+For `local_embedded`, the default endpoint is `http://localhost:8888`. If the resolved endpoint is remote, for example `HINDSIGHT_DAEMON_URL=http://192.168.42.20:8888`, the backend treats that daemon as authoritative and does not try to start `hindsight-embed daemon start` on the serving host. Local daemon startup is attempted only for `localhost`, `127.0.0.1`, or `::1` endpoints.
+
+Opening the Hindsight section automatically loads its contents. If a configured local embedded endpoint refuses the connection, that read path may start the local `hindsight-embed` daemon before retrying. “Read-only” means the plugin exposes no memory mutation operation; it does not mean that local provider process management is disabled.
 
 When local daemon startup is needed, the plugin resolves `hindsight-embed` from `PATH`, the current Python environment, Hermes' bundled venv under `$HERMES_HOME/hermes-agent/venv/bin`, the default `~/.hermes/hermes-agent/venv/bin`, or `~/.local/bin`. If the binary cannot be found, the error includes safe diagnostics for `PATH`, `sys.executable`, and checked paths.
 
-Secrets such as `HINDSIGHT_API_KEY` and `HINDSIGHT_LLM_API_KEY` are only detected as boolean `*_present` flags and are never returned in plugin responses. Hindsight is query-oriented rather than a complete list API, so the dashboard only calls recall/reflect after the user clicks a button. `/snapshot` and page load include status/config only.
+Secrets such as `HINDSIGHT_API_KEY` and `HINDSIGHT_LLM_API_KEY` are only detected as boolean `*_present` flags and are never returned in plugin responses. Hindsight is query-oriented rather than a complete list API, so the interfaces only call recall/reflect after the user clicks a button. `/snapshot` includes status/config only; the interfaces may separately load the read-only `/hindsight/contents` view on page mount.
 
 The plugin performs read-only/query-only calls through Hermes' Hindsight provider internals and the official `hindsight_client` SDK:
 
@@ -356,237 +466,21 @@ The plugin performs read-only/query-only CLI calls:
 - `brv locations --format json`
 - `brv status --format json [--project-root ...]`
 - `brv search QUERY --format json --limit N [--scope ...]`
-- `brv query QUERY --format json --timeout N` only after the user clicks `Run query`
+- `brv query QUERY --format json` only after the user clicks `Run query`
+
+The query timeout controls how long the backend waits for the ByteRover subprocess; it is not passed as a `brv` CLI option.
 
 It does not expose `brv curate`, `brv review approve`, version-control, push/pull, sync, or other mutation commands.
 
-## API endpoints
+## API documentation
 
-Hermes mounts this plugin under:
-
-```text
-/api/plugins/hermes-memory-ui/
-```
-
-Available API endpoints:
-
-### GET `/status`
-
-Returns plugin status, active Hermes home, configured memory provider, built-in memory paths, holographic DB path, Mem0 configuration status, Honcho configuration status, Mnemosyne configuration status, Hindsight configuration status, and ByteRover CLI/configuration status.
-
-Example:
-
-```bash
-curl http://127.0.0.1:9119/api/plugins/hermes-memory-ui/status | jq
-```
-
-### GET `/builtin`
-
-Returns parsed built-in memory stores:
-
-- `memory` from `$HERMES_HOME/memories/MEMORY.md`
-- `user` from `$HERMES_HOME/memories/USER.md`
-
-Entries are split on Hermes' built-in delimiter §.
-
-The response includes entry count, char count, configured/default char limits, usage percentage, file path, and modified timestamp.
-
-### GET `/session-search`
-
-Runs an explicit read-only search over previous Hermes sessions through Hermes' built-in `session_search` tool. This endpoint is not called from `/snapshot` or page load; the UI calls it only after the user submits a query.
-
-Query parameters:
-
-- `query`: required search query
-- `limit`: 1-10, default 3
-- `sort`: `newest` or `oldest`, default `newest`
-- `source`: optional exact source/type filter, e.g. `cli`, `telegram`, `cron`, `discord`, `web`, or `api-server` (`api` is accepted as an alias)
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/session-search?query=dashboard&limit=3&sort=newest' | jq
-```
-
-### GET `/holographic`
-
-Returns facts from holographic SQLite memory.
-
-Query parameters:
-
-- `limit`: 1-2000, default 500
-- `category`: optional category filter, e.g. `user_pref`, `project`, `tool`, `general`
-- `min_trust`: 0.0-1.0, default 0.0
-- `search`: optional substring search over `content` and `tags`
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/holographic?limit=100&min_trust=0.3' | jq
-```
-
-### GET `/mem0`
-
-Returns read-only memories from the Mem0 Platform API.
-
-Query parameters:
-
-- `limit`: 1-2000, default 500
-- `search`: optional search query; uses Mem0 semantic search
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mem0?limit=100&search=dashboard' | jq
-```
-
-### GET `/honcho`
-
-Returns read-only Honcho provider state, user/AI peer cards, representations, conclusions, and optional context search.
-
-Query parameters:
-
-- `limit`: 1-100, default 50
-- `search`: optional context search query
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/honcho?limit=25&search=dashboard' | jq
-```
-
-### GET `/mnemosyne`
-
-Returns Mnemosyne provider status plus read-only local store contents.
-
-### GET `/mnemosyne/contents`
-
-Lists Mnemosyne local SQLite memory and fact rows. This is read-only.
-
-Query parameters:
-
-- `search`: optional text filter applied to visible memory/fact text and metadata columns
-- `limit`: optional, defaults to 25, capped at 100
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mnemosyne/contents?search=dashboard&limit=25' | jq
-```
-
-### GET `/mnemosyne/recall`
-
-Runs explicit Mnemosyne recall through the Hermes provider.
-
-Query parameters:
-
-- `query`: required query string
-- `limit`: 1-100, default 25
-- `temporal_weight`: 0.0-1.0, default 0.2
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mnemosyne/recall?query=dashboard&limit=25&temporal_weight=0.2' | jq
-```
-
-### GET `/mnemosyne/prefetch`
-
-Returns the injected-context preview generated by Mnemosyne prefetch.
-
-Query parameters:
-
-- `query`: required query string
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/mnemosyne/prefetch?query=dashboard' | jq
-```
-
-### GET `/byterover`
-
-Returns read-only ByteRover CLI status, registered locations, and optional BM25 search results.
-
-Query parameters:
-
-- `limit`: 1-50, default 10
-- `search`: optional search query; uses `brv search --format json`
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/byterover?limit=10&search=dashboard' | jq
-```
-
-### GET `/byterover/query`
-
-Runs explicit ByteRover query/synthesis. This may invoke ByteRover's configured model; it is never called automatically on page load.
-
-Query parameters:
-
-- `query`: required question string
-- `timeout`: 1-300 seconds, default 60
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/byterover/query?query=dashboard&timeout=60' | jq
-```
-
-### GET `/hindsight`
-
-Returns Hindsight provider status/config only. It does not run recall or reflect.
-
-### GET `/hindsight/contents`
-
-Lists Hindsight memory units and retained source documents through the official `hindsight_client` SDK. This is read-only. The UI loads it for the Hindsight section and also provides a manual `Refresh contents` action.
-
-Query parameters:
-
-- `search`: optional text filter applied to memory/document text, IDs, tags, and metadata
-- `limit`: optional, defaults to 25, capped at 100
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/hindsight/contents?search=dashboard&limit=25' | jq
-```
-
-### GET `/hindsight/recall`
-
-Runs explicit Hindsight recall.
-
-Query parameters:
-
-- `query`: required query string
-- `limit`: 1-100, default 25
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/hindsight/recall?query=dashboard&limit=25' | jq
-```
-
-### GET `/hindsight/reflect`
-
-Runs explicit Hindsight reflect/synthesis.
-
-Query parameters:
-
-- `query`: required query string
-
-Example:
-
-```bash
-curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/hindsight/reflect?query=dashboard' | jq
-```
-
-### GET `/snapshot`
-
-Combined payload used by the UI. Accepts the same query parameters as `/holographic`; `limit` and `search` are also applied to Mem0, Honcho, Mnemosyne, and ByteRover, with Honcho and Mnemosyne internally capped at 100 and ByteRover capped at 50. Hindsight in `/snapshot` is status/config only and does not query recall/reflect.
-
-```bash
-curl http://127.0.0.1:9119/api/plugins/hermes-memory-ui/snapshot | jq
-```
+Backend routes, query parameters, and `curl` examples are documented in [README-API.md](README-API.md).
 
 ## Security notes
 
 The plugin displays memory content. Treat this as private data.
 
-Hermes dashboard plugin API routes are intended for the local dashboard. Do not expose the dashboard publicly with untrusted plugins installed. In particular, avoid binding the dashboard to `0.0.0.0` unless you understand the risk.
+Hermes plugin API routes are intended for trusted Dashboard or Desktop clients. Do not expose the serving dashboard or gateway publicly with untrusted plugins installed unless you understand the risk.
 
 This plugin does not expose mutation endpoints, but it can reveal personal preferences, environment details, project facts, and other durable context stored in memory.
 
@@ -601,11 +495,11 @@ Memory writes are semantically loaded:
 - Mnemosyne maintains embeddings, Memoria-derived structured tables, graph rows, sleep/consolidation flows, and provider-level recall semantics.
 - Built-in `memory(add)` may mirror into holographic memory, but `replace`, `remove`, and direct file edits do not reliably mirror.
 
-A dashboard that writes directly to files or SQLite can silently corrupt memory semantics.
+An interface that writes directly to files or SQLite can silently corrupt memory semantics.
 
 ### Why plugin backend instead of direct browser access?
 
-The browser cannot and should not read local files or SQLite directly. `plugin_api.py` runs inside the dashboard process, can resolve the active profile's `HERMES_HOME`, and can safely expose a narrow JSON API.
+The Dashboard browser and Desktop renderer cannot and should not read local files or SQLite directly. `plugin_api.py` runs inside the serving Hermes process, resolves the active profile's `HERMES_HOME`, and exposes a narrow JSON API.
 
 ## Potential roadmap
 
@@ -642,13 +536,14 @@ Plugin extensions to consider (**feel free to contribute!**):
    - tag filter
    - date ranges
 
-6. Optional dashboard slots
-   - small memory usage widget in `config:top`
+6. Optional surface integrations
+   - small Dashboard memory usage widget in `config:top`
+   - Desktop status-bar memory usage indicator
    - warning badge when built-in memory is near char limit
 
 ## Troubleshooting
 
-### The Memory tab does not appear
+### The Dashboard Memory tab does not appear
 
 Check plugin discovery:
 
@@ -670,7 +565,11 @@ test -f ~/.hermes/plugins/hermes-memory-ui/dashboard/manifest.json && echo ok
 
 ### Backend endpoint returns 404
 
-Plugin backend routes are mounted at dashboard startup. Restart `hermes dashboard`.
+Confirm that `hermes-memory-ui` is present in `plugins.enabled`. Backend routes are mounted at process startup, so restart `hermes dashboard` for the Dashboard interface or the Hermes gateway used by Desktop.
+
+### The Desktop Memory page does not appear
+
+Check that `$HERMES_HOME/desktop-plugins/hermes-memory-ui/plugin.js` exists and that the folder name matches the exported plugin ID, then open `Settings → Plugins` and enable `Hermes Memory UI`. If needed, run `Reload desktop plugins` from the command palette and inspect `hermes logs gui -f`.
 
 ### Holographic section says DB missing
 
@@ -702,11 +601,11 @@ The plugin script is loading before or outside the Hermes dashboard plugin runti
 
 - Read-only only.
 - Holographic search uses simple SQL `LIKE`, not FTS5 query syntax yet.
-- Mem0 API mode depends on the `mem0ai` package being installed in the dashboard environment and a configured Mem0 API key.
+- Mem0 API mode depends on the `mem0ai` package being installed in the serving Hermes environment and a configured Mem0 API key.
 - Local `mem0.Memory` stores are not supported; this plugin mirrors Hermes' current cloud/API-oriented Mem0 provider.
 - Honcho support depends on Hermes' bundled Honcho provider helpers and a configured Honcho API key or base URL.
 - Hindsight support depends on Hermes' bundled Hindsight provider helpers and a configured Hindsight Cloud/local setup.
-- ByteRover support depends on the `brv` CLI being available in the dashboard environment and, for project-specific status/search, a configured or auto-detected ByteRover project.
+- ByteRover support depends on the `brv` CLI being available in the serving Hermes environment and, for project-specific status/search, a configured or auto-detected ByteRover project.
 - No pagination yet; use `limit` filter.
 
 ## License

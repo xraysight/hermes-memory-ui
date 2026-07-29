@@ -1,0 +1,864 @@
+{
+  "id": "normal",
+  "label": "All providers — normal",
+  "description": "Representative populated responses for every provider and every query-only operation.",
+  "assertions": [
+    "Prefers concise release notes",
+    "Dashboard accessibility audit",
+    "Hermes should preserve profile-scoped settings",
+    "Project Aurora uses SQLite",
+    "The release checklist requires a smoke test",
+    "Memory retention policy",
+    "hermes-demo",
+    "Preview fixtures never contact provider APIs",
+    "Tuesday morning is the preferred deployment window",
+    "Readiness is high because accessibility, syntax, render, and smoke checks are all represented",
+    "Contents operation indexed the release planning conversation",
+    "Deterministic preview generation is required before packaging",
+    "Prefetch context for release work",
+    "Preview query summary: migration readiness depends on four verified checks",
+    "Session search found the migration discussion"
+  ],
+  "snapshot": {
+    "plugin": "hermes-memory-ui",
+    "version": "0.6.0",
+    "mode": "read-only",
+    "generated_at": 1753783200,
+    "builtin": {
+      "hermes_home": "/home/demo/.hermes",
+      "generated_at": 1753783200,
+      "total_entries": 8,
+      "stores": [
+        {
+          "id": "memory",
+          "label": "Agent memory",
+          "filename": "MEMORY.md",
+          "path": "/home/demo/.hermes/memories/MEMORY.md",
+          "exists": true,
+          "entries": [
+            "Project Aurora uses SQLite for durable local state.",
+            "The desktop preview is generated from sorted development fixtures.",
+            "Provider inspection is read-only and must never mutate memory state.",
+            "Release verification runs syntax, VM render, and pytest checks."
+          ],
+          "entry_count": 4,
+          "char_count": 257,
+          "char_limit": 2200,
+          "usage_percent": 11.7,
+          "modified_at": 1753779600,
+          "error": null
+        },
+        {
+          "id": "user",
+          "label": "User profile",
+          "filename": "USER.md",
+          "path": "/home/demo/.hermes/memories/USER.md",
+          "exists": true,
+          "entries": [
+            "Prefers concise release notes with concrete test output.",
+            "Usually reviews accessibility findings before approving a release.",
+            "Works in Europe/Warsaw and prefers morning deployment windows.",
+            "Values deterministic tooling and preservation of unrelated changes."
+          ],
+          "entry_count": 4,
+          "char_count": 260,
+          "char_limit": 1375,
+          "usage_percent": 18.9,
+          "modified_at": 1753779660,
+          "error": null
+        }
+      ]
+    },
+    "holographic": {
+      "id": "holographic",
+      "label": "Holographic memory",
+      "provider_configured": true,
+      "db_path": "/home/demo/.hermes/memory_store.db",
+      "exists": true,
+      "facts": [
+        {
+          "fact_id": 17,
+          "content": "Dashboard accessibility audit is scheduled before release.",
+          "category": "project",
+          "tags": "[\"dashboard\", \"accessibility\"]",
+          "trust_score": 0.91,
+          "retrieval_count": 4,
+          "helpful_count": 3,
+          "created_at": "2026-07-20T09:30:00Z",
+          "updated_at": "2026-07-28T14:15:00Z"
+        },
+        {
+          "fact_id": 18,
+          "content": "The preview catalog is generated from sorted JSON fixtures.",
+          "category": "technical",
+          "tags": "[\"preview\", \"determinism\", \"build\"]",
+          "trust_score": 0.97,
+          "retrieval_count": 9,
+          "helpful_count": 8,
+          "created_at": "2026-07-20T10:05:00Z",
+          "updated_at": "2026-07-29T07:45:00Z"
+        },
+        {
+          "fact_id": 19,
+          "content": "The maintainer prefers exact command output in completion reports.",
+          "category": "user_pref",
+          "tags": "[\"reporting\", \"tests\"]",
+          "trust_score": 0.86,
+          "retrieval_count": 6,
+          "helpful_count": 5,
+          "created_at": "2026-07-21T08:20:00Z",
+          "updated_at": "2026-07-27T16:00:00Z"
+        },
+        {
+          "fact_id": 20,
+          "content": "Preview mode must not issue live provider REST requests.",
+          "category": "constraint",
+          "tags": "[\"read-only\", \"providers\", \"safety\"]",
+          "trust_score": 1.0,
+          "retrieval_count": 14,
+          "helpful_count": 14,
+          "created_at": "2026-07-22T11:10:00Z",
+          "updated_at": "2026-07-29T08:00:00Z"
+        },
+        {
+          "fact_id": 21,
+          "content": "Tuesday morning is the preferred low-traffic deployment window.",
+          "category": "schedule",
+          "tags": "[\"release\", \"deployment\", \"Tuesday\"]",
+          "trust_score": 0.73,
+          "retrieval_count": 3,
+          "helpful_count": 2,
+          "created_at": "2026-07-23T13:40:00Z",
+          "updated_at": "2026-07-28T09:20:00Z"
+        },
+        {
+          "fact_id": 22,
+          "content": "Project Aurora documentation lives beside architecture decision records.",
+          "category": "project",
+          "tags": "[\"Aurora\", \"documentation\", \"ADR\"]",
+          "trust_score": 0.82,
+          "retrieval_count": 5,
+          "helpful_count": 4,
+          "created_at": "2026-07-24T15:00:00Z",
+          "updated_at": "2026-07-28T17:30:00Z"
+        }
+      ],
+      "fact_count": 6,
+      "total_facts": 22,
+      "categories": [
+        {"category": "project", "count": 7},
+        {"category": "user_pref", "count": 5},
+        {"category": "technical", "count": 4},
+        {"category": "constraint", "count": 3},
+        {"category": "schedule", "count": 3}
+      ],
+      "entities_count": 14,
+      "memory_banks_count": 4,
+      "limit": 100,
+      "error": null,
+      "generated_at": 1753783200
+    },
+    "mem0": {
+      "id": "mem0",
+      "label": "Mem0 memory",
+      "provider_configured": true,
+      "mode": "read-only",
+      "config_path": "/home/demo/.hermes/mem0.json",
+      "config_exists": true,
+      "api_key_present": true,
+      "user_id": "demo-user",
+      "agent_id": "hermes",
+      "memories": [
+        {
+          "id": "mem0-42",
+          "memory": "Hermes should preserve profile-scoped settings during upgrades.",
+          "score": 0.884,
+          "created_at": "2026-07-21T10:00:00Z",
+          "updated_at": "2026-07-27T16:20:00Z",
+          "user_id": "demo-user",
+          "agent_id": "hermes",
+          "metadata": {"project": "Aurora", "source": "conversation"}
+        },
+        {
+          "id": "mem0-43",
+          "memory": "Accessibility review happens before the release candidate is tagged.",
+          "score": 0.931,
+          "created_at": "2026-07-22T09:15:00Z",
+          "updated_at": "2026-07-28T08:10:00Z",
+          "user_id": "demo-user",
+          "agent_id": null,
+          "metadata": {"topic": "release", "source": "checklist", "priority": "high"}
+        },
+        {
+          "id": "mem0-44",
+          "memory": "Hermes reports the exact syntax, render, and pytest commands it ran.",
+          "score": 0.812,
+          "created_at": "2026-07-23T12:30:00Z",
+          "updated_at": "2026-07-26T18:00:00Z",
+          "user_id": null,
+          "agent_id": "hermes",
+          "metadata": {"topic": "reporting", "channel": "desktop"}
+        },
+        {
+          "id": "mem0-45",
+          "memory": "The preferred deployment window is Tuesday morning in Europe/Warsaw.",
+          "score": 0.769,
+          "created_at": "2026-07-24T07:00:00Z",
+          "updated_at": "2026-07-28T07:30:00Z",
+          "user_id": "demo-user",
+          "agent_id": "release-helper",
+          "metadata": {"topic": "schedule", "timezone": "Europe/Warsaw"}
+        },
+        {
+          "id": "mem0-46",
+          "memory": "Development fixtures use fictional paths and must contain no credentials.",
+          "score": 0.996,
+          "created_at": "2026-07-25T14:20:00Z",
+          "updated_at": "2026-07-29T06:50:00Z",
+          "user_id": "demo-user",
+          "agent_id": "hermes",
+          "metadata": {"topic": "fixture-safety", "reviewed": true}
+        },
+        {
+          "id": "mem0-47",
+          "memory": "The preview route is separate from the production memory route.",
+          "score": 0.704,
+          "created_at": "2026-07-26T16:45:00Z",
+          "updated_at": "2026-07-27T10:00:00Z",
+          "user_id": "preview-reviewer",
+          "agent_id": "hermes",
+          "metadata": {"route": "/memory-preview", "environment": "development"}
+        }
+      ],
+      "memory_count": 6,
+      "total_memories": 11,
+      "limit": 100,
+      "search": "",
+      "error": null,
+      "generated_at": 1753783200
+    },
+    "honcho": {
+      "id": "honcho",
+      "label": "Honcho memory",
+      "provider_configured": true,
+      "mode": "read-only",
+      "config_path": "/home/demo/.hermes/honcho.json",
+      "config_exists": true,
+      "api_key_present": true,
+      "base_url_present": false,
+      "enabled": true,
+      "host": "hermes",
+      "workspace": "demo-workspace",
+      "user_peer": "demo-user",
+      "ai_peer": "hermes",
+      "environment": "production",
+      "recall_mode": "hybrid",
+      "session_strategy": "per-directory",
+      "user": {
+        "peer_id": "demo-user",
+        "card": [
+          "The user reviews accessibility before shipping.",
+          "The user expects exact test commands and outputs in handoff notes.",
+          "The user protects unrelated uncommitted work during fixture changes."
+        ],
+        "representation": "A careful maintainer who values deterministic tooling, realistic preview data, and production isolation.",
+        "conclusions": [
+          {
+            "id": "conclusion-user-1",
+            "content": "The release checklist requires a smoke test.",
+            "created_at": "2026-07-22T11:00:00Z",
+            "updated_at": "2026-07-28T09:00:00Z",
+            "session_id": "session-101",
+            "metadata": {"confidence": "high"}
+          },
+          {
+            "id": "conclusion-user-2",
+            "content": "A provider preview is useful only when cards expose varied metadata and scope.",
+            "created_at": "2026-07-23T09:30:00Z",
+            "updated_at": "2026-07-28T10:15:00Z",
+            "session_id": "session-104",
+            "metadata": {"confidence": "medium", "topic": "preview-quality"}
+          }
+        ],
+        "total_conclusions": 2,
+        "total_card_facts": 3
+      },
+      "ai": {
+        "peer_id": "hermes",
+        "card": [
+          "Hermes explains operational trade-offs explicitly.",
+          "Hermes keeps preview provider calls synchronous and fixture-backed.",
+          "Hermes validates generated JavaScript before running the complete suite."
+        ],
+        "representation": "A profile-aware assistant with read-only memory inspection and deterministic preview tooling.",
+        "conclusions": [
+          {
+            "id": "conclusion-ai-1",
+            "content": "Sorted fixture filenames and stable JSON serialization produce reproducible previews.",
+            "created_at": "2026-07-24T11:00:00Z",
+            "updated_at": "2026-07-29T07:05:00Z",
+            "session_id": "session-102",
+            "metadata": {"confidence": "high", "topic": "determinism"}
+          },
+          {
+            "id": "conclusion-ai-2",
+            "content": "VM rendering can verify every query-only operation without contacting providers.",
+            "created_at": "2026-07-25T13:00:00Z",
+            "updated_at": "2026-07-29T07:20:00Z",
+            "session_id": "session-103",
+            "metadata": {"confidence": "high", "topic": "testing"}
+          }
+        ],
+        "total_conclusions": 2,
+        "total_card_facts": 3
+      },
+      "search_results": [
+        {
+          "source": "User peer conclusion",
+          "peer_id": "demo-user",
+          "id": "conclusion-user-1",
+          "content": "The release checklist requires a smoke test."
+        },
+        {
+          "source": "AI peer conclusion",
+          "peer_id": "hermes",
+          "id": "conclusion-ai-1",
+          "content": "Stable serialization keeps preview builds deterministic."
+        },
+        {
+          "source": "User peer card",
+          "peer_id": "demo-user",
+          "id": "user-card-2",
+          "content": "Completion notes include exact test outputs."
+        },
+        {
+          "source": "AI peer card",
+          "peer_id": "hermes",
+          "id": "ai-card-2",
+          "content": "Preview provider calls are fixture-backed and read-only."
+        }
+      ],
+      "search_result_count": 4,
+      "limit": 100,
+      "search": "release",
+      "error": null,
+      "generated_at": 1753783200
+    },
+    "mnemosyne": {
+      "id": "mnemosyne",
+      "label": "Mnemosyne memory",
+      "provider_configured": true,
+      "mode": "read-only/query-only",
+      "config_path": "/home/demo/.hermes/config.yaml",
+      "data_dir": "/home/demo/.hermes/mnemosyne",
+      "db_path": "/home/demo/.hermes/mnemosyne/mnemosyne.db",
+      "db_exists": true,
+      "prefetch_content_chars": "4000",
+      "auto_sleep_enabled": true,
+      "operation": "contents",
+      "limit": 100,
+      "search": "",
+      "table_counts": {"episodic_memory": 8, "memoria_facts": 7, "vec_episodes_rowids": 8, "vec_facts_rowids": 7},
+      "memories": [
+        {
+          "id": "episode-7",
+          "text": "Project Aurora uses SQLite and a generated single-file preview.",
+          "score": 0.78,
+          "type": "episodic",
+          "source": "cli",
+          "timestamp": "2026-07-27T13:00:00Z",
+          "created_at": "2026-07-27T13:00:00Z",
+          "session_id": "session-101",
+          "importance": 0.8,
+          "tier": "warm",
+          "recall_count": 2,
+          "last_recalled": "2026-07-28T08:00:00Z",
+          "scope": "project",
+          "channel_id": null,
+          "trust_tier": "verified",
+          "metadata": {"project": "Aurora"}
+        },
+        {
+          "id": "episode-8",
+          "text": "The accessibility audit found that provider cards need meaningful sample content.",
+          "score": 0.91,
+          "type": "episodic",
+          "source": "desktop",
+          "timestamp": "2026-07-27T15:20:00Z",
+          "created_at": "2026-07-27T15:20:00Z",
+          "session_id": "session-102",
+          "importance": 0.9,
+          "tier": "hot",
+          "recall_count": 4,
+          "last_recalled": "2026-07-29T07:10:00Z",
+          "scope": "project",
+          "channel_id": "desktop-preview",
+          "trust_tier": "verified",
+          "metadata": {"project": "Aurora", "topic": "accessibility"}
+        },
+        {
+          "id": "episode-9",
+          "text": "A syntax check caught malformed generated JavaScript before packaging.",
+          "score": 0.83,
+          "type": "event",
+          "source": "ci",
+          "timestamp": "2026-07-28T06:40:00Z",
+          "created_at": "2026-07-28T06:40:00Z",
+          "session_id": "session-103",
+          "importance": 0.75,
+          "tier": "warm",
+          "recall_count": 1,
+          "last_recalled": "2026-07-28T08:00:00Z",
+          "scope": "workspace",
+          "channel_id": "checks",
+          "trust_tier": "observed",
+          "metadata": {"command": "node --check", "outcome": "passed"}
+        },
+        {
+          "id": "episode-10",
+          "text": "The preview VM rendered fixture operations without making REST calls.",
+          "score": 0.88,
+          "type": "episodic",
+          "source": "test",
+          "timestamp": "2026-07-28T10:10:00Z",
+          "created_at": "2026-07-28T10:10:00Z",
+          "session_id": "session-104",
+          "importance": 0.85,
+          "tier": "hot",
+          "recall_count": 3,
+          "last_recalled": "2026-07-29T08:05:00Z",
+          "scope": "project",
+          "channel_id": "vm-harness",
+          "trust_tier": "verified",
+          "metadata": {"network_calls": 0, "fixture": "normal"}
+        },
+        {
+          "id": "episode-11",
+          "text": "The final handoff preserved pre-existing documentation and API changes.",
+          "score": 0.72,
+          "type": "summary",
+          "source": "cli",
+          "timestamp": "2026-07-29T08:25:00Z",
+          "created_at": "2026-07-29T08:25:00Z",
+          "session_id": "session-105",
+          "importance": 0.7,
+          "tier": "warm",
+          "recall_count": 0,
+          "last_recalled": null,
+          "scope": "profile",
+          "channel_id": null,
+          "trust_tier": "inferred",
+          "metadata": {"topic": "worktree-safety"}
+        }
+      ],
+      "memory_count": 5,
+      "total_memories": 8,
+      "facts": [
+        {
+          "id": "fact-5",
+          "text": "preview route: /memory-preview",
+          "score": 0.95,
+          "type": "memoria_facts",
+          "source": "session-101",
+          "timestamp": "2026-07-28T08:30:00Z",
+          "created_at": null,
+          "metadata": {"fact_type": "project", "key": "preview route"}
+        },
+        {
+          "id": "fact-6",
+          "text": "preview mode: read-only/query-only",
+          "score": 0.99,
+          "type": "memoria_facts",
+          "source": "session-102",
+          "timestamp": "2026-07-28T09:00:00Z",
+          "created_at": null,
+          "metadata": {"fact_type": "constraint", "verified": true}
+        },
+        {
+          "id": "fact-7",
+          "text": "release checks: syntax, render, pytest",
+          "score": 0.9,
+          "type": "semantic_fact",
+          "source": "session-103",
+          "timestamp": "2026-07-28T10:00:00Z",
+          "created_at": "2026-07-28T10:00:00Z",
+          "metadata": {"fact_type": "workflow", "count": 3}
+        },
+        {
+          "id": "fact-8",
+          "text": "deployment timezone: Europe/Warsaw",
+          "score": 0.76,
+          "type": "user_fact",
+          "source": "session-104",
+          "timestamp": "2026-07-28T12:15:00Z",
+          "created_at": null,
+          "metadata": {"fact_type": "preference", "scope": "user"}
+        },
+        {
+          "id": "fact-9",
+          "text": "provider fixture data: fictional and credential-free",
+          "score": 1.0,
+          "type": "constraint_fact",
+          "source": "session-105",
+          "timestamp": "2026-07-29T07:30:00Z",
+          "created_at": "2026-07-29T07:30:00Z",
+          "metadata": {"fact_type": "safety", "reviewed": true}
+        }
+      ],
+      "fact_count": 5,
+      "total_facts": 7,
+      "vector_rows": 15,
+      "error": null,
+      "generated_at": 1753783200
+    },
+    "hindsight": {
+      "id": "hindsight",
+      "label": "Hindsight memory",
+      "provider_configured": true,
+      "config_path": "/home/demo/.hermes/hindsight/config.json",
+      "config_exists": true,
+      "mode": "cloud",
+      "mode_label": "query-only",
+      "api_url": "https://api.hindsight.vectorize.io",
+      "api_key_present": true,
+      "llm_key_present": true,
+      "llm_provider": "openai",
+      "llm_model": "gpt-4.1-mini",
+      "bank_id": "hermes-demo",
+      "bank_id_template": "",
+      "recall_budget": "mid",
+      "memory_mode": "hybrid",
+      "auto_retain": true,
+      "auto_recall": true,
+      "operation": "status",
+      "query": "",
+      "limit": 25,
+      "results": [],
+      "result_count": 0,
+      "reflection": "",
+      "error": null,
+      "generated_at": 1753783200
+    },
+    "byterover": {
+      "id": "byterover",
+      "label": "ByteRover memory",
+      "provider_configured": true,
+      "mode": "read-only",
+      "config_path": "/home/demo/.hermes/byterover.json",
+      "config_exists": true,
+      "brv_available": true,
+      "brv_path": "/usr/local/bin/brv",
+      "project_root": "/work/aurora",
+      "project_exists": true,
+      "search_scope": "project",
+      "locations": [
+        {"name": "aurora", "path": "/work/aurora", "kind": "project", "status": "ready"},
+        {"name": "architecture", "path": "/work/aurora/docs/architecture", "kind": "documentation", "status": "indexed"},
+        {"name": "desktop tests", "path": "/work/aurora/tests/desktop", "kind": "test-suite", "status": "indexed"},
+        {"name": "shared runbooks", "path": "/work/shared/runbooks", "kind": "shared", "status": "stale"}
+      ],
+      "location_count": 4,
+      "status": {
+        "indexedFiles": 184,
+        "indexedDocuments": 63,
+        "lastSync": "2026-07-28T12:00:00Z",
+        "branch": "feature/preview",
+        "queueDepth": 0,
+        "state": "ready"
+      },
+      "results": [
+        {
+          "id": "docs/memory.md",
+          "path": "docs/memory.md",
+          "title": "Memory retention policy",
+          "score": 0.92,
+          "excerpt": "Memory retention policy keeps preview data separate from production state.",
+          "raw_excerpt": "",
+          "metadata": {"language": "markdown"}
+        },
+        {
+          "id": "docs/architecture/preview.md",
+          "path": "docs/architecture/preview.md",
+          "title": "Desktop preview architecture",
+          "score": 0.88,
+          "excerpt": "The desktop preview embeds sorted provider fixtures into a single JavaScript module.",
+          "raw_excerpt": "",
+          "metadata": {"language": "markdown", "section": "Fixture catalog", "status": "accepted"}
+        },
+        {
+          "id": "tests/desktop_plugin_render.mjs",
+          "path": "tests/desktop_plugin_render.mjs",
+          "title": "VM render harness",
+          "score": 0.84,
+          "excerpt": "The VM harness expands nested components and verifies representative provider output.",
+          "raw_excerpt": "",
+          "metadata": {"language": "javascript", "kind": "test", "runtime": "node"}
+        },
+        {
+          "id": "scripts/build_desktop_preview.py",
+          "path": "scripts/build_desktop_preview.py",
+          "title": "Preview builder",
+          "score": 0.79,
+          "excerpt": "The build script validates fixture structure and emits deterministic catalog bytes.",
+          "raw_excerpt": "",
+          "metadata": {"language": "python", "kind": "build-tool"}
+        },
+        {
+          "id": "docs/release-checklist.md",
+          "path": "docs/release-checklist.md",
+          "title": "Release checklist",
+          "score": 0.73,
+          "excerpt": "Run syntax checks, the provider render harness, and the complete pytest suite.",
+          "raw_excerpt": "",
+          "metadata": {"language": "markdown", "owner": "release-team", "reviewed": true}
+        },
+        {
+          "id": "docs/accessibility/provider-cards.md",
+          "path": "docs/accessibility/provider-cards.md",
+          "title": "Provider card accessibility notes",
+          "score": 0.67,
+          "excerpt": "Representative content makes wrapping, badges, and metadata sections easier to review.",
+          "raw_excerpt": "",
+          "metadata": {"language": "markdown", "audit": "desktop", "severity": "informational"}
+        }
+      ],
+      "result_count": 6,
+      "total_found": 18,
+      "search": "memory",
+      "limit": 10,
+      "error": null,
+      "generated_at": 1753783200
+    }
+  },
+  "operations": {
+    "session_search": {
+      "id": "session_search",
+      "label": "Session search",
+      "mode": "read-only/query-only",
+      "operation": "discover",
+      "query": "migration",
+      "source": "",
+      "limit": 10,
+      "sort": "newest",
+      "results": [
+        {
+          "session_id": "session-101",
+          "when": "2 hours ago",
+          "source": "cli",
+          "model": "hermes-3",
+          "title": "Session search found the migration discussion",
+          "matched_role": "assistant",
+          "match_message_id": 14,
+          "snippet": "The desktop migration keeps plugin routes profile scoped.",
+          "messages": [
+            {"id": 13, "role": "user", "content": "Is the dashboard migration ready?"},
+            {"id": 14, "role": "assistant", "content": "The dashboard migration is ready after the smoke test.", "anchor": true}
+          ],
+          "messages_before": 12,
+          "messages_after": 2
+        },
+        {
+          "session_id": "session-102",
+          "when": "yesterday",
+          "source": "telegram",
+          "model": "hermes-3",
+          "title": "Accessibility review follow-up",
+          "matched_role": "user",
+          "match_message_id": 8,
+          "snippet": "The provider cards need varied content to make wrapping issues visible.",
+          "messages": [
+            {"id": 7, "role": "assistant", "content": "The fixture preview is ready for a visual pass."},
+            {"id": 8, "role": "user", "content": "Please add enough realistic provider records to exercise the card layout.", "anchor": true},
+            {"id": 9, "role": "assistant", "content": "I will cover snapshot and query-only operation results."}
+          ],
+          "messages_before": 6,
+          "messages_after": 1
+        },
+        {
+          "session_id": "session-103",
+          "when": "3 days ago",
+          "source": "web",
+          "model": "hermes-2",
+          "title": "Release checklist review",
+          "matched_role": "assistant",
+          "match_message_id": 22,
+          "snippet": "Syntax and render checks run before the complete pytest suite.",
+          "messages": [
+            {"id": 21, "role": "user", "content": "Which checks protect the generated preview?"},
+            {"id": 22, "role": "assistant", "content": "Run node syntax checks, the VM render harness, then pytest.", "anchor": true}
+          ],
+          "messages_before": 20,
+          "messages_after": 0
+        },
+        {
+          "session_id": "session-104",
+          "when": "last week",
+          "source": "api",
+          "model": "hermes-2",
+          "title": "Fixture safety discussion",
+          "matched_role": "assistant",
+          "match_message_id": 5,
+          "snippet": "Example data stays fictional, credential-free, and isolated from production behavior.",
+          "messages": [
+            {"id": 4, "role": "user", "content": "Can the preview contain live account identifiers?"},
+            {"id": 5, "role": "assistant", "content": "No. Use fictional paths, users, projects, and metadata only.", "anchor": true}
+          ],
+          "messages_before": 3,
+          "messages_after": 4
+        }
+      ],
+      "count": 4,
+      "unfiltered_count": 12,
+      "error": null,
+      "generated_at": 1753783200
+    },
+    "hindsight_contents": {
+      "id": "hindsight",
+      "label": "Hindsight memory",
+      "provider_configured": true,
+      "mode": "cloud",
+      "mode_label": "query-only",
+      "operation": "contents",
+      "search": "",
+      "limit": 25,
+      "memories": [
+        {"id": "hs-memory-1", "text": "The preferred deployment window is Tuesday morning.", "score": 0.87, "type": "world", "metadata": {"tags": ["release"], "source": "planning"}},
+        {"id": "hs-memory-2", "text": "Accessibility review must finish before the release candidate is tagged.", "score": 0.93, "type": "experience", "metadata": {"tags": ["accessibility", "release"], "confidence": "high"}},
+        {"id": "hs-memory-3", "text": "The preview builder reads provider fixtures in deterministic filename order.", "score": 0.9, "type": "world", "metadata": {"tags": ["preview", "build"], "component": "desktop"}},
+        {"id": "hs-memory-4", "text": "Generated preview code is syntax-checked before the VM render harness runs.", "score": 0.85, "type": "experience", "metadata": {"tags": ["testing"], "command": "node --check"}},
+        {"id": "hs-memory-5", "text": "Unrelated working-tree changes remain untouched during fixture enrichment.", "score": 0.81, "type": "opinion", "metadata": {"tags": ["workflow", "safety"], "scope": "repository"}}
+      ],
+      "memory_count": 5,
+      "total_memories": 17,
+      "documents": [
+        {"id": "hs-doc-1", "text": "Preview fixtures never contact provider APIs.", "type": "document", "score": null, "metadata": {"source": "hindsight_client_documents", "memory_unit_count": 2, "text_length": 45, "tags": ["preview"]}},
+        {"id": "hs-doc-2", "text": "The release runbook lists accessibility, syntax, VM render, and pytest verification.", "type": "document", "score": null, "metadata": {"source": "hindsight_client_documents", "memory_unit_count": 4, "text_length": 82, "tags": ["release", "runbook"]}},
+        {"id": "hs-doc-3", "text": "Provider fixture guidance requires fictional identifiers and realistic metadata.", "type": "document", "score": null, "metadata": {"source": "hindsight_client_documents", "memory_unit_count": 3, "text_length": 75, "tags": ["fixtures", "safety"]}},
+        {"id": "hs-doc-4", "text": "The desktop architecture note explains the isolated /memory-preview route.", "type": "document", "score": null, "metadata": {"source": "hindsight_client_documents", "memory_unit_count": 2, "text_length": 71, "tags": ["desktop", "architecture"]}}
+      ],
+      "document_count": 4,
+      "total_documents": 9,
+      "stats": {"memory_units": 17, "documents": 9, "entities": 12, "bank_size_bytes": 24576},
+      "error": null
+    },
+    "hindsight_recall": {
+      "id": "hindsight",
+      "label": "Hindsight memory",
+      "provider_configured": true,
+      "mode": "cloud",
+      "operation": "recall",
+      "query": "deployment window",
+      "limit": 25,
+      "results": [
+        {"id": "hs-recall-1", "text": "Tuesday morning is the preferred deployment window.", "score": 0.94, "type": "world", "metadata": {"bank_id": "hermes-demo", "source": "planning"}},
+        {"id": "hs-recall-2", "text": "Accessibility approval is the first release gate.", "score": 0.91, "type": "experience", "metadata": {"bank_id": "hermes-demo", "gate": 1}},
+        {"id": "hs-recall-3", "text": "Both source and generated preview modules must pass node --check.", "score": 0.88, "type": "world", "metadata": {"bank_id": "hermes-demo", "gate": 2}},
+        {"id": "hs-recall-4", "text": "The VM harness renders provider snapshots and every query-only operation.", "score": 0.84, "type": "experience", "metadata": {"bank_id": "hermes-demo", "gate": 3}},
+        {"id": "hs-recall-5", "text": "The complete pytest suite is the final release gate.", "score": 0.8, "type": "world", "metadata": {"bank_id": "hermes-demo", "gate": 4}}
+      ],
+      "result_count": 5,
+      "reflection": "",
+      "error": null
+    },
+    "hindsight_reflect": {
+      "id": "hindsight",
+      "label": "Hindsight memory",
+      "provider_configured": true,
+      "mode": "cloud",
+      "operation": "reflect",
+      "query": "release readiness",
+      "limit": 1,
+      "results": [],
+      "result_count": 0,
+      "reflection": "Readiness is high because accessibility, syntax, render, and smoke checks are all represented. The preview remains isolated from live providers, uses fictional data, and preserves the production route and behavior. The remaining release decision should be based on the complete pytest result and a final review of generated output.",
+      "reflection_source": "hindsight_reflect",
+      "error": null
+    },
+    "mnemosyne_contents": {
+      "id": "mnemosyne",
+      "label": "Mnemosyne memory",
+      "provider_configured": true,
+      "mode": "read-only/query-only",
+      "operation": "contents",
+      "db_path": "/home/demo/.hermes/mnemosyne/mnemosyne.db",
+      "db_exists": true,
+      "memories": [
+        {"id": "contents-episode-1", "text": "Contents operation indexed the release planning conversation.", "type": "episodic", "source": "cli", "timestamp": "2026-07-25T09:00:00Z", "metadata": {"topic": "release"}},
+        {"id": "contents-episode-2", "text": "A desktop review requested realistic provider fixture density.", "type": "episodic", "source": "desktop", "timestamp": "2026-07-26T10:30:00Z", "metadata": {"topic": "preview"}},
+        {"id": "contents-episode-3", "text": "The build validator recorded minimum collection counts.", "type": "event", "source": "build", "timestamp": "2026-07-27T12:00:00Z", "metadata": {"outcome": "valid"}},
+        {"id": "contents-episode-4", "text": "The VM harness found all representative operation markers.", "type": "event", "source": "test", "timestamp": "2026-07-28T14:00:00Z", "metadata": {"network_calls": 0}},
+        {"id": "contents-episode-5", "text": "The release handoff included exact verification output.", "type": "summary", "source": "cli", "timestamp": "2026-07-29T08:00:00Z", "metadata": {"scope": "project"}}
+      ],
+      "memory_count": 5,
+      "total_memories": 8,
+      "facts": [
+        {"id": "contents-fact-1", "text": "render tests: dependency-free VM", "type": "memoria_facts", "source": "session-101", "metadata": {"kind": "tooling"}},
+        {"id": "contents-fact-2", "text": "fixture catalog order: normal first", "type": "memoria_facts", "source": "session-102", "metadata": {"kind": "ordering"}},
+        {"id": "contents-fact-3", "text": "preview REST call count: zero", "type": "test_fact", "source": "session-103", "metadata": {"verified": true}},
+        {"id": "contents-fact-4", "text": "production route: /memory", "type": "project_fact", "source": "session-104", "metadata": {"environment": "production"}},
+        {"id": "contents-fact-5", "text": "preview route: /memory-preview", "type": "project_fact", "source": "session-105", "metadata": {"environment": "development"}}
+      ],
+      "fact_count": 5,
+      "total_facts": 7,
+      "vector_rows": 15,
+      "error": null
+    },
+    "mnemosyne_recall": {
+      "id": "mnemosyne",
+      "label": "Mnemosyne memory",
+      "provider_configured": true,
+      "mode": "read-only/query-only",
+      "operation": "recall",
+      "query": "release",
+      "limit": 25,
+      "temporal_weight": 0.2,
+      "results": [
+        {"id": "recall-1", "text": "Deterministic preview generation is required before packaging.", "score": 0.93, "type": "episodic", "source": "cli", "timestamp": "2026-07-28T11:00:00Z", "metadata": {"project": "Aurora", "rank": 1}},
+        {"id": "recall-2", "text": "The source and generated JavaScript both require syntax validation.", "score": 0.89, "type": "semantic", "source": "test", "timestamp": "2026-07-28T10:30:00Z", "metadata": {"rank": 2}},
+        {"id": "recall-3", "text": "Representative render markers cover every provider and operation.", "score": 0.85, "type": "episodic", "source": "desktop", "timestamp": "2026-07-27T16:00:00Z", "metadata": {"rank": 3}},
+        {"id": "recall-4", "text": "Fixture density validation prevents sparse preview regressions.", "score": 0.8, "type": "semantic", "source": "build", "timestamp": "2026-07-27T09:45:00Z", "metadata": {"rank": 4}},
+        {"id": "recall-5", "text": "Production UI behavior remains unchanged by preview-only fixture data.", "score": 0.77, "type": "constraint", "source": "cli", "timestamp": "2026-07-26T13:15:00Z", "metadata": {"rank": 5}}
+      ],
+      "result_count": 5,
+      "context": "",
+      "context_char_count": 0,
+      "result_source": "mnemosyne_recall",
+      "error": null
+    },
+    "mnemosyne_prefetch": {
+      "id": "mnemosyne",
+      "label": "Mnemosyne memory",
+      "provider_configured": true,
+      "mode": "read-only/query-only",
+      "operation": "prefetch",
+      "query": "release",
+      "limit": 25,
+      "temporal_weight": 0.2,
+      "results": [],
+      "result_count": 0,
+      "context": "Prefetch context for release work: preserve unrelated changes, rebuild the deterministic provider preview, validate desktop/plugin.js and the generated module with node --check, run the dependency-free VM render harness, and finish with the complete pytest suite. Treat all provider data as fictional and keep every operation read-only.",
+      "context_char_count": 336,
+      "result_source": "mnemosyne_prefetch",
+      "error": null
+    },
+    "byterover_query": {
+      "id": "byterover",
+      "label": "ByteRover memory",
+      "provider_configured": true,
+      "mode": "read-only",
+      "operation": "query",
+      "query": "Is the migration ready?",
+      "answer": "The migration is ready when four independent checks pass: the accessibility review confirms usable provider cards, both JavaScript modules pass syntax validation, the VM harness renders every representative fixture item without REST calls, and the complete pytest suite succeeds. Preview fixtures remain development-only and do not change production behavior.",
+      "answer_summary": "Preview query summary: migration readiness depends on four verified checks.",
+      "matched_docs": [
+        {"path": "docs/release-checklist.md", "score": 0.94, "metadata": {"section": "Verification"}},
+        {"path": "tests/desktop_plugin_render.mjs", "score": 0.91, "metadata": {"section": "Fixture assertions"}},
+        {"path": "scripts/build_desktop_preview.py", "score": 0.87, "metadata": {"section": "Catalog validation"}},
+        {"path": "docs/architecture/preview.md", "score": 0.82, "metadata": {"section": "Production isolation"}}
+      ],
+      "task_id": "brv-task-7",
+      "top_score": 0.92,
+      "error": null
+    }
+  }
+}
