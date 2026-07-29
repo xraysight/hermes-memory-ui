@@ -42,18 +42,11 @@ jobs:
             git diff-tree --check --root --no-commit-id -r HEAD
           fi
 
-      - name: Build Desktop fixture preview
-        run: uv run python scripts/build_desktop_preview.py
-
       - name: Check JavaScript syntax
-        run: |
-          node --check desktop/plugin.js
-          node --check build/desktop-preview/plugin.js
+        run: node --check desktop/plugin.js
 
-      - name: Run Desktop VM harnesses
-        run: |
-          node --experimental-vm-modules tests/desktop_plugin_smoke.mjs desktop/plugin.js
-          node --experimental-vm-modules tests/desktop_plugin_render.mjs build/desktop-preview/plugin.js
+      - name: Run Desktop VM harness
+        run: node --experimental-vm-modules tests/desktop_plugin_smoke.mjs desktop/plugin.js
 
       - name: Run pytest
         run: uv run --with pytest==9.1.1 --with pyyaml==6.0.3 python -m pytest -q

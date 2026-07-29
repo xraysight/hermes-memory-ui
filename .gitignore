@@ -17,7 +17,6 @@ venv/
 .DS_Store
 .env
 
-# JavaScript and generated artifacts
+# JavaScript
 node_modules/
 dist/*.map
-build/

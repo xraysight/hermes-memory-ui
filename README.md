@@ -7,8 +7,8 @@ The Dashboard and Desktop interfaces are separate delivery artifacts. They share
 Current scope:
 
 - Built-in memory:
-  * `MEMORY.md` — agent notes / environment facts / project conventions
-  * `USER.md` — user profile / preferences
+  * `MEMORY.md` - agent notes / environment facts / project conventions
+  * `USER.md` - user profile / preferences
 - Session search:
   * explicit read-only search over previous Hermes sessions via Hermes' `session_search` tool
   * optional source/type filter such as CLI, Telegram, cron, Discord, web, or API sessions
@@ -161,55 +161,18 @@ Hermes Desktop watches its plugin directory and normally hot-reloads `plugin.js`
 
 If it still fails to load, run `hermes logs gui -f`. If the Desktop UI loads but its scoped API calls return 404, restart the Hermes gateway after confirming that `hermes-memory-ui` is present in `plugins.enabled`; backend routes are mounted at gateway startup.
 
-### Development provider-fixture preview
-
-The preview plugin is development-only. It embeds synthetic provider responses, makes no live provider REST calls, and does not install, configure, enable, or mutate any memory provider. It has a separate `Memory Preview` route and can be installed alongside the production plugin.
-
-Build the deterministic single-file preview from `desktop/plugin.js` and the JSON cases in `tests/fixtures/providers`:
-
-```bash
-uv run python scripts/build_desktop_preview.py
-node --check build/desktop-preview/plugin.js
-```
-
-Install it for the default Hermes profile:
-
-```bash
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-mkdir -p "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview"
-cp build/desktop-preview/plugin.js \
-  "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview/plugin.js"
-```
-
-In Hermes Desktop, open `Memory Preview` and use the `Development preview fixture` selector to switch among normal, empty, error, and long-content states. The Hindsight, Mnemosyne, ByteRover, and session-search controls return the selected case's fixture responses; they never query a live backend. If the page does not appear, run `Reload desktop plugins` from the command palette and enable `Hermes Memory UI Preview` under `Settings → Plugins`.
-
-Remove the preview without affecting the production plugin:
-
-```bash
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-rm -f "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview/plugin.js"
-rmdir "$HERMES_HOME/desktop-plugins/hermes-memory-ui-preview" 2>/dev/null || true
-```
-
-Generated files under `build/` are ignored by Git and should not be committed.
-
 ## Development and repository layout
 
 - `desktop/` contains the production Desktop disk plugin source. Keep it as uncompiled ESM without JSX syntax or unsupported imports.
 - `dashboard/` contains the Dashboard manifest, shared Python API, and tracked `dist/` browser assets. `dashboard/dist/` is release content, not a disposable local build directory.
-- `scripts/` contains the deterministic Desktop fixture-preview builder.
-- `tests/fixtures/providers/` contains source JSON fixtures and must remain tracked. The Python tests and Node VM harnesses live directly under `tests/`.
-- `build/` is generated and ignored. `build/desktop-preview/plugin.js` is recreated from `desktop/plugin.js` plus the provider fixtures.
+- `tests/` contains the Python test suite and production Desktop VM smoke harness.
 
 Run the complete verification suite from the repository root:
 
 ```bash
 git diff --check
-uv run python scripts/build_desktop_preview.py
 node --check desktop/plugin.js
-node --check build/desktop-preview/plugin.js
 node --experimental-vm-modules tests/desktop_plugin_smoke.mjs desktop/plugin.js
-node --experimental-vm-modules tests/desktop_plugin_render.mjs build/desktop-preview/plugin.js
 uv run --with pytest==9.1.1 --with pyyaml==6.0.3 python -m pytest -q
 ```
 
