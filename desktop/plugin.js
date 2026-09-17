@@ -1082,7 +1082,8 @@ function Mem0Provider({ data, t }) {
     ],
     statusRows: [
       { label: 'API key', value: data?.api_key_present },
-      { label: t('status'), value: data?.config_exists }
+      { label: t('status'), value: data?.config_exists },
+      ...(data?.host ? [{ label: 'Host', value: data.host }] : [])
     ],
     children: jsx(Collection, { items: memories, title: t('memories'), t, kind: t('result') })
   })
