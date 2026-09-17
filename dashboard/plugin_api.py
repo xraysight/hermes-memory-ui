@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -45,6 +46,11 @@ DEFAULT_FACT_LIMIT = 500
 MAX_FACT_LIMIT = 2000
 DEFAULT_MEM0_LIMIT = 500
 MAX_MEM0_LIMIT = 2000
+# The self-hosted Mem0 FastAPI server rejects top_k >= 2000 (422), so it gets its own cap.
+MAX_MEM0_SELFHOSTED_LIMIT = 1000
+DEFAULT_MEM0_TIMEOUT = 30
+# Hosts owned by the Mem0 Platform API; anything else in mem0.json's `host` is self-hosted.
+MEM0_PLATFORM_HOSTS = {"api.mem0.ai", "mem0.ai", "www.mem0.ai"}
 DEFAULT_HONCHO_LIMIT = 50
 MAX_HONCHO_LIMIT = 100
 DEFAULT_HINDSIGHT_LIMIT = 25
@@ -611,6 +617,8 @@ def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
     rerank = pick("rerank", "MEM0_RERANK", True)
     if isinstance(rerank, str):
         rerank = rerank.strip().lower() not in {"0", "false", "no", "off"}
+    host = pick("host", "MEM0_HOST", "") or ""
+    host = host.strip().rstrip("/") if isinstance(host, str) else ""
     return {
         "config_path": str(config_path),
         "config_exists": config_path.exists(),
@@ -618,9 +626,54 @@ def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "user_id": pick("user_id", "MEM0_USER_ID", "hermes-user"),
         "agent_id": pick("agent_id", "MEM0_AGENT_ID", "hermes"),
         "rerank": rerank,
+        "host": host,
+        "self_hosted": _mem0_is_self_hosted(host),
         # Keep the real value private and local to the API call path.
         "_api_key": api_key,
     }
+
+
+def _mem0_is_self_hosted(host: str) -> bool:
+    """True when ``mem0.json`` points at a self-hosted Mem0 server, not the Platform API.
+
+    The self-hosted server speaks its own REST dialect (``X-API-Key`` header, ``top_k``
+    listing) and the Platform SDK cannot reach it, so the two need different clients.
+    """
+    if not host:
+        return False
+    try:
+        hostname = (urllib.parse.urlparse(host).hostname or "").lower()
+    except Exception:
+        return False
+    if not hostname:
+        return False
+    return hostname not in MEM0_PLATFORM_HOSTS
+
+
+def _mem0_selfhosted_call(cfg: Dict[str, Any], *, search: Optional[str], limit: int) -> Any:
+    """Read memories from a self-hosted Mem0 server over its REST API."""
+    base_url = str(cfg.get("host") or "").rstrip("/")
+    top_k = max(1, min(int(limit), MAX_MEM0_SELFHOSTED_LIMIT))
+    headers = {
+        "X-API-Key": cfg.get("_api_key") or "",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if search:
+        body = json.dumps({
+            "query": search,
+            "user_id": cfg["user_id"],
+            "agent_id": cfg["agent_id"],
+            "top_k": top_k,
+            "rerank": bool(cfg.get("rerank", True)),
+        }).encode("utf-8")
+        request = urllib.request.Request(f"{base_url}/search", data=body, headers=headers, method="POST")
+    else:
+        query = urllib.parse.urlencode({"user_id": cfg["user_id"], "top_k": top_k})
+        request = urllib.request.Request(f"{base_url}/memories?{query}", headers=headers, method="GET")
+    with urllib.request.urlopen(request, timeout=DEFAULT_MEM0_TIMEOUT) as response:
+        raw = response.read().decode("utf-8", "replace")
+    return json.loads(raw) if raw.strip() else {}
 
 
 def _unwrap_mem0_results(response: Any) -> List[Any]:
@@ -672,6 +725,8 @@ def _mem0_payload(
     except Exception:
         limit = DEFAULT_MEM0_LIMIT
     limit = max(1, min(limit, MAX_MEM0_LIMIT))
+    if mem0_cfg["self_hosted"]:
+        limit = min(limit, MAX_MEM0_SELFHOSTED_LIMIT)
 
     base: Dict[str, Any] = {
         "id": "mem0",
@@ -683,6 +738,8 @@ def _mem0_payload(
         "api_key_present": mem0_cfg["api_key_present"],
         "user_id": mem0_cfg["user_id"],
         "agent_id": mem0_cfg["agent_id"],
+        "host": mem0_cfg["host"],
+        "self_hosted": mem0_cfg["self_hosted"],
         "memories": [],
         "memory_count": 0,
         "total_memories": 0,
@@ -697,18 +754,20 @@ def _mem0_payload(
             base["error"] = "Mem0 API key not configured. Set MEM0_API_KEY in $HERMES_HOME/.env or the process environment."
             return base
 
-        try:
-            from mem0 import MemoryClient  # type: ignore
-        except ImportError:
-            base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai."
-            return base
-
-        client = MemoryClient(api_key=mem0_cfg["_api_key"])
-        filters = {"user_id": mem0_cfg["user_id"]}
-        if search:
-            response = client.search(query=search, filters=filters, rerank=mem0_cfg["rerank"], top_k=limit)
+        if mem0_cfg["self_hosted"]:
+            response = _mem0_selfhosted_call(mem0_cfg, search=search, limit=limit)
         else:
-            response = client.get_all(filters=filters)
+            try:
+                from mem0 import MemoryClient  # type: ignore
+            except ImportError:
+                base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai."
+                return base
+            client = MemoryClient(api_key=mem0_cfg["_api_key"])
+            filters = {"user_id": mem0_cfg["user_id"]}
+            if search:
+                response = client.search(query=search, filters=filters, rerank=mem0_cfg["rerank"], top_k=limit)
+            else:
+                response = client.get_all(filters=filters)
         all_memories = [_normalize_mem0_memory(item, index) for index, item in enumerate(_unwrap_mem0_results(response))]
         base["total_memories"] = len(all_memories)
         base["memories"] = _filter_mem0_memories(all_memories, None, limit)
@@ -2378,6 +2437,8 @@ async def status() -> Dict[str, Any]:
             "api_key_present": mem0_cfg["api_key_present"],
             "user_id": mem0_cfg["user_id"],
             "agent_id": mem0_cfg["agent_id"],
+            "host": mem0_cfg["host"],
+            "self_hosted": mem0_cfg["self_hosted"],
             "provider_configured": _dig(config, "memory", "provider", default=None) == "mem0",
         },
         "honcho": {
