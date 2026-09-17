@@ -245,6 +245,85 @@ def test_mem0_search_uses_search_endpoint(monkeypatch, tmp_path):
     assert calls == [("init", "secret-token"), ("search", "dashboard", {"user_id": "u1"}, True, 7)]
 
 
+def test_mem0_self_hosted_host_reads_via_rest_api(monkeypatch, tmp_path):
+    """A mem0.json pointing at a self-hosted server must be read over its REST API.
+
+    The Platform SDK (``MemoryClient``) only reaches api.mem0.ai: handed a self-hosted
+    host it answers "Invalid API key" and the dashboard shows zero memories.
+    """
+    import http.server
+    import threading
+
+    seen = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _respond(self, items):
+            body = json.dumps({"results": items}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            seen.append(("GET", self.path, self.headers.get("X-API-Key")))
+            self._respond([{"id": "m1", "memory": "self-hosted memory"}])
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            seen.append(("POST", self.path, payload, self.headers.get("X-API-Key")))
+            self._respond([{"id": "m2", "memory": "self-hosted search hit"}])
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
+        (tmp_path / "mem0.json").write_text(json.dumps({
+            "host": f"http://127.0.0.1:{server.server_port}",
+            "api_key": "k" * 64,
+            "user_id": "u1",
+            "agent_id": "a1",
+        }), encoding="utf-8")
+
+        module = load_plugin_api(monkeypatch, tmp_path)
+        listing = module._mem0_payload(limit=5)
+
+        assert listing["error"] is None
+        assert listing["self_hosted"] is True
+        assert listing["total_memories"] == 1
+        assert listing["memories"][0]["memory"] == "self-hosted memory"
+        assert seen[0][0] == "GET"
+        assert seen[0][1].startswith("/memories?") and "user_id=u1" in seen[0][1]
+        assert seen[0][2] == "k" * 64
+
+        found = module._mem0_payload(limit=5, search="hit")
+
+        assert found["error"] is None
+        assert found["memories"][0]["memory"] == "self-hosted search hit"
+        assert seen[1][0] == "POST"
+        assert seen[1][1] == "/search"
+        assert seen[1][2]["query"] == "hit" and seen[1][2]["user_id"] == "u1"
+        assert seen[1][3] == "k" * 64
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_mem0_host_missing_and_platform_host_keep_platform_client(monkeypatch, tmp_path):
+    """Only a non-platform host switches clients; the Platform path stays untouched."""
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._mem0_is_self_hosted("") is False
+    assert module._mem0_is_self_hosted("https://api.mem0.ai") is False
+    assert module._mem0_is_self_hosted("https://api.mem0.ai/") is False
+    assert module._mem0_is_self_hosted("http://127.0.0.1:8888") is True
+    assert module._mem0_is_self_hosted("http://mem0.internal:8888") is True
+
+
 def test_provider_error_messages_are_redacted(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: mem0\n", encoding="utf-8")
     (tmp_path / "mem0.json").write_text(json.dumps({"user_id": "u1"}), encoding="utf-8")
