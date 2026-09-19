@@ -78,7 +78,7 @@ async def _profile_request_scope(profile: Optional[str] = Query(None)):
 
 router = APIRouter(dependencies=[Depends(_profile_request_scope)])
 
-PLUGIN_VERSION = "0.6.1"
+PLUGIN_VERSION = "0.6.2"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
