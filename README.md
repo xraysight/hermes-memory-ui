@@ -85,6 +85,16 @@ The built-in memory view works always, while external memory provider sections a
 
 The Desktop UI and Python backend are enabled separately. The regular plugin must be installed and present in `plugins.enabled` so Hermes mounts `dashboard/plugin_api.py`; copying or enabling only the Desktop disk plugin is not sufficient.
 
+## Profile selection and provider scope
+
+The Dashboard `Profile` selector applies to the Memory page. Every Dashboard plugin request follows the profile currently shown in the selector, including the first visit and a return to the page after selecting a profile elsewhere. A response started for an earlier selection is not displayed after the selection changes. Desktop provides the equivalent profile routing through its plugin-scoped `ctx.rest` client.
+
+The shared Python backend resolves built-in files, local provider stores, provider configuration, and provider secrets inside the selected Hermes profile. This request scope is context-local: it does not rewrite the dashboard process environment, and concurrent requests for different profiles remain isolated. Provider subprocesses receive a child environment built for that same selected profile.
+
+Profile selection chooses configuration; it does not create a separate remote provider account or data partition. Two profiles that point to the same Mem0 user, Honcho workspace/peers, Hindsight bank, ByteRover project, or another identical backend scope intentionally see the same backend data. Use distinct provider-side scope identifiers or credentials when the profiles must not share it.
+
+On older Hermes hosts that do not provide the context-local profile scope helper, requests without an explicit profile (including `profile=current`) keep the existing single-profile behavior. An explicit named profile, including `profile=default`, returns HTTP 501 rather than risking reads with the launch profile's home or credentials. No minimum Hermes version is inferred from this compatibility check.
+
 ## Installation
 
 The default profile lives at `~/.hermes`. A named profile lives at `~/.hermes/profiles/<name>`; use `hermes -p <name> ...` for plugin commands and set `HERMES_HOME="$HOME/.hermes/profiles/<name>"` for the copy commands below.
@@ -171,9 +181,19 @@ Run the complete verification suite from the repository root:
 
 ```bash
 git diff --check
+node --check dashboard/dist/index.js
+node tests/dashboard_profile_scope_smoke.mjs dashboard/dist/index.js
 node --check desktop/plugin.js
 node --experimental-vm-modules tests/desktop_plugin_smoke.mjs desktop/plugin.js
 uv run --with pytest==9.1.1 --with pyyaml==6.0.3 python -m pytest -q
+```
+
+The pytest wrapper discovers a local Hermes Agent checkout/venv for the real FastAPI regression and reports a clear skip when FastAPI, HTTPX, or the host source is unavailable. To make host discovery repeatable in a non-default layout, set `HERMES_HOST_PYTHON` to the host venv's Python executable and `HERMES_AGENT_SOURCE` to the Hermes Agent source root. The integration creates only temporary synthetic profile homes and replaces external provider/process boundaries, so it does not read or change real profiles and does not make provider network calls. It can also be run directly:
+
+```bash
+export HERMES_HOST_PYTHON=/path/to/hermes-agent/venv/bin/python
+export HERMES_AGENT_SOURCE=/path/to/hermes-agent
+"$HERMES_HOST_PYTHON" tests/profile_scope_http_regression.py
 ```
 
 ## What the UI shows

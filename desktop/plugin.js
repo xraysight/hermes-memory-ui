@@ -24,7 +24,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 
-const VERSION = '0.6.0'
+const VERSION = '0.6.1'
 const PLUGIN_ID = 'hermes-memory-ui'
 const PLUGIN_NAME = 'Hermes Memory UI'
 const PLUGIN_ROUTE = '/memory'

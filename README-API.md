@@ -16,6 +16,16 @@ Plugin backend routes are mounted when the serving Hermes process starts. If a r
 
 Dashboard calls these routes through its authenticated API client. Desktop uses profile-aware, namespace-relative calls such as `ctx.rest('/snapshot')`; Desktop plugin code should not hard-code the base route.
 
+## Profile scope
+
+All endpoints accept the optional `profile` query parameter used by the Dashboard selector and Desktop's scoped REST client. A named profile scopes the request's Hermes home, configuration, secrets, local stores, provider calls, worker-thread context, and provider subprocess environment. The backend uses Hermes' context-local request scope and never changes the process environment per request, so concurrent profile requests remain isolated.
+
+`profile=current`, an empty value, or an omitted parameter means the serving process's current profile. `profile=default` explicitly selects the default profile; other values select the corresponding named profile. Invalid names return 400 and missing profiles return 404 through Hermes' resolver.
+
+Profile routing does not override provider-side sharing. Profiles configured with the same remote account and scope identifiers (for example a Mem0 user, Honcho workspace/peers, or Hindsight bank) share that provider data by design.
+
+For compatibility, a host without Hermes' safe context-local profile helper continues to serve omitted/empty/`current` requests as a single-profile backend. It returns 501 for any explicit profile selection, including `default`, rather than falling back to the launch profile's credentials. The plugin does not claim a speculative minimum Hermes version; capability detection is performed at request time.
+
 ## Available endpoints
 
 ### GET `/status`

@@ -19,6 +19,51 @@
   const useMemo = hooks.useMemo;
   const e = React.createElement;
 
+  // Dashboard's generic fetchJSON does not profile-scope /api/plugins. The
+  // selector projects its value into ?profile=. Read it after the host's
+  // parent effects have synchronized bare sidebar navigation, including the
+  // first visit when this bundle has never observed a profile. Do not cache
+  // selection: it can change while the plugin page is unmounted.
+  // Desktop uses its own profile-aware ctx.rest client.
+  const STALE_PROFILE_RESPONSE = {};
+
+  function selectedProfile() {
+    const params = new URLSearchParams(window.location.search || "");
+    return (params.get("profile") || "").trim() || null;
+  }
+
+  function withSelectedProfile(path, profile) {
+    if (!profile) return path;
+    const hashAt = path.indexOf("#");
+    const hash = hashAt >= 0 ? path.slice(hashAt) : "";
+    const beforeHash = hashAt >= 0 ? path.slice(0, hashAt) : path;
+    const questionAt = beforeHash.indexOf("?");
+    const pathname = questionAt >= 0 ? beforeHash.slice(0, questionAt) : beforeHash;
+    const params = new URLSearchParams(questionAt >= 0 ? beforeHash.slice(questionAt + 1) : "");
+    if (!params.has("profile")) params.set("profile", profile);
+    const query = params.toString();
+    return pathname + (query ? "?" + query : "") + hash;
+  }
+
+  async function fetchPluginJSON(path) {
+    // React runs child effects before ProfileProvider's URL-sync effect.
+    // Yield one task so requests never race that synchronous projection.
+    await new Promise(function (resolve) { setTimeout(resolve, 0); });
+    const requestProfile = selectedProfile();
+    return SDK.fetchJSON(withSelectedProfile(path, requestProfile)).then(function (payload) {
+      // Host routes remount on a selector change, but guard locally too: an
+      // older host or an unusual navigation must never paint a late response
+      // from the previous account/profile.
+      return selectedProfile() === requestProfile ? payload : STALE_PROFILE_RESPONSE;
+    });
+  }
+
+  function publishFresh(setter) {
+    return function (payload) {
+      if (payload !== STALE_PROFILE_RESPONSE) setter(payload);
+    };
+  }
+
   function fmtTime(value) {
     if (!value) return "—";
     const date = typeof value === "number"
@@ -176,8 +221,8 @@
       if (source) p.set("source", source);
       setLoading(true);
       setError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/session-search?" + p.toString())
-        .then(function (payload) { setData(payload); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/session-search?" + p.toString())
+        .then(publishFresh(setData))
         .catch(function (err) { setError(err && err.message ? err.message : String(err)); })
         .finally(function () { setLoading(false); });
     }
@@ -604,8 +649,8 @@
       p.set("query", query);
       setQueryLoading(true);
       setQueryError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/byterover/query?" + p.toString())
-        .then(function (payload) { setQueryData(payload); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/byterover/query?" + p.toString())
+        .then(publishFresh(setQueryData))
         .catch(function (err) { setQueryError(err && err.message ? err.message : String(err)); })
         .finally(function () { setQueryLoading(false); });
     }
@@ -726,8 +771,8 @@
       if (kind === "recall") p.set("limit", limit || "25");
       setOperationLoading(true);
       setOperationError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/hindsight/" + kind + "?" + p.toString())
-        .then(function (payload) { setOperationData(payload); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/hindsight/" + kind + "?" + p.toString())
+        .then(publishFresh(setOperationData))
         .catch(function (err) { setOperationError(err && err.message ? err.message : String(err)); })
         .finally(function () { setOperationLoading(false); });
     }
@@ -738,8 +783,8 @@
       if (query.trim()) p.set("search", query);
       setContentsLoading(true);
       setContentsError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/hindsight/contents?" + p.toString())
-        .then(function (payload) { setContentsData(payload); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/hindsight/contents?" + p.toString())
+        .then(publishFresh(setContentsData))
         .catch(function (err) { setContentsError(err && err.message ? err.message : String(err)); })
         .finally(function () { setContentsLoading(false); });
     }
@@ -869,8 +914,8 @@
       }
       setOperationLoading(true);
       setOperationError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/mnemosyne/" + kind + "?" + p.toString())
-        .then(function (payload) { setOperationData(payload); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/mnemosyne/" + kind + "?" + p.toString())
+        .then(publishFresh(setOperationData))
         .catch(function (err) { setOperationError(err && err.message ? err.message : String(err)); })
         .finally(function () { setOperationLoading(false); });
     }
@@ -881,8 +926,8 @@
       if (query.trim()) p.set("search", query);
       setContentsLoading(true);
       setContentsError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/mnemosyne/contents?" + p.toString())
-        .then(function (payload) { setContentsData(payload); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/mnemosyne/contents?" + p.toString())
+        .then(publishFresh(setContentsData))
         .catch(function (err) { setContentsError(err && err.message ? err.message : String(err)); })
         .finally(function () { setContentsLoading(false); });
     }
@@ -999,8 +1044,8 @@
     function refresh() {
       setLoading(true);
       setError(null);
-      SDK.fetchJSON("/api/plugins/hermes-memory-ui/snapshot?" + query)
-        .then(function (data) { setSnapshot(data); })
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/snapshot?" + query)
+        .then(publishFresh(setSnapshot))
         .catch(function (err) { setError(err && err.message ? err.message : String(err)); })
         .finally(function () { setLoading(false); });
     }

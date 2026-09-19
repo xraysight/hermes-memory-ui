@@ -22,22 +22,63 @@ import sys
 import threading
 import time
 import urllib.parse
+from contextvars import copy_context
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
-    from fastapi import APIRouter, Query
+    from fastapi import APIRouter, Depends, HTTPException, Query
 except Exception:  # Allows local syntax/import tests outside the dashboard.
     class APIRouter:  # type: ignore
+        def __init__(self, *_args, **_kwargs):
+            pass
+
         def get(self, *_args, **_kwargs):
             return lambda fn: fn
+
+    def Depends(dependency=None, **_kwargs):  # type: ignore
+        return dependency
+
+    class HTTPException(Exception):  # type: ignore
+        def __init__(self, status_code: int, detail: str):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
 
     def Query(default=None, **_kwargs):  # type: ignore
         return default
 
-router = APIRouter()
 
-PLUGIN_VERSION = "0.6.0"
+async def _profile_request_scope(profile: Optional[str] = Query(None)):
+    """Bind one plugin request to its explicitly selected Hermes profile.
+
+    Dashboard's generic SDK does not classify ``/api/plugins`` as profile
+    scoped, while Desktop already appends the active profile to ``ctx.rest``.
+    The plugin accepts the same query contract in both hosts and delegates all
+    validation, home resolution, and credential isolation to Hermes' own
+    context-local request scope. Older single-profile Hermes versions remain
+    compatible when no profile (or ``current``) is requested; an explicit
+    profile fails closed when the safe host helper is unavailable.
+    """
+    requested = (profile or "").strip()
+    try:
+        from hermes_cli.web_server_profiles import _config_profile_scope
+    except (ImportError, AttributeError) as exc:
+        if requested and requested.lower() != "current":
+            raise HTTPException(
+                status_code=501,
+                detail="This Hermes version cannot safely scope plugin requests to another profile.",
+            ) from exc
+        yield
+        return
+
+    with _config_profile_scope(requested or None):
+        yield
+
+
+router = APIRouter(dependencies=[Depends(_profile_request_scope)])
+
+PLUGIN_VERSION = "0.6.1"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
@@ -177,11 +218,46 @@ def _load_simple_env_file(path: Path) -> Dict[str, str]:
 
 
 def _env_value(key: str, default: str = "") -> str:
-    value = os.environ.get(key)
-    if value not in (None, ""):
-        return str(value)
-    file_env = _load_simple_env_file(_hermes_home() / ".env")
-    return file_env.get(key, default)
+    """Read an env-style value from the active profile's secret scope.
+
+    ``os.environ`` belongs to the dashboard's launch profile and must never
+    win while a request is routed to another profile. Hermes' secret resolver
+    is context-local and includes the selected profile's ``.env`` and external
+    secret sources. The local parser is retained only for compatibility with
+    older, single-profile Hermes releases that lack that resolver.
+    """
+    try:
+        from agent.secret_scope import get_secret
+    except ImportError:
+        value = os.environ.get(key)
+        if value not in (None, ""):
+            return str(value)
+        file_env = _load_simple_env_file(_hermes_home() / ".env")
+        return file_env.get(key, default)
+    value = get_secret(key, None)
+    return default if value in (None, "") else str(value)
+
+
+def _profile_child_env() -> Dict[str, str]:
+    """Build a credential-bearing child environment for the active profile.
+
+    Current Hermes scrubs the launch profile and overlays only the selected
+    profile's credentials. The fallback supports older single-profile hosts;
+    explicit cross-profile requests are already refused by the dependency on
+    those versions.
+    """
+    try:
+        from tools.environments.local import served_profile_child_env
+    except ImportError:
+        env = os.environ.copy()
+        for key, value in _load_simple_env_file(_hermes_home() / ".env").items():
+            env.setdefault(key, value)
+        env["HERMES_HOME"] = str(_hermes_home())
+        return env
+    return served_profile_child_env(
+        target_home=_hermes_home(),
+        inherit_credentials=True,
+    )
 
 
 def _truthy(value: Any, default: bool = False) -> bool:
@@ -602,7 +678,7 @@ def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
             file_cfg = {}
 
     def pick(key: str, env_key: str, default: Any = None) -> Any:
-        value = os.environ.get(env_key, default)
+        value = _env_value(env_key, default)
         if key in file_cfg and file_cfg.get(key) not in (None, ""):
             value = file_cfg.get(key)
         return value
@@ -790,14 +866,14 @@ def _honcho_config_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str,
         "provider_configured": provider == "honcho",
         "config_path": str(fallback_path),
         "config_exists": fallback_path.exists(),
-        "api_key_present": bool(os.environ.get("HONCHO_API_KEY")),
-        "base_url_present": bool(os.environ.get("HONCHO_BASE_URL")),
+        "api_key_present": bool(_env_value("HONCHO_API_KEY")),
+        "base_url_present": bool(_env_value("HONCHO_BASE_URL")),
         "enabled": False,
-        "host": os.environ.get("HERMES_HONCHO_HOST", "hermes"),
+        "host": _env_value("HERMES_HONCHO_HOST", "hermes"),
         "workspace": "hermes",
         "user_peer": "user",
         "ai_peer": "hermes",
-        "environment": os.environ.get("HONCHO_ENVIRONMENT", "production"),
+        "environment": _env_value("HONCHO_ENVIRONMENT", "production"),
         "recall_mode": "hybrid",
         "session_strategy": "per-directory",
         "save_messages": None,
@@ -1682,8 +1758,7 @@ def _ensure_hindsight_local_daemon(cfg: Dict[str, Any]) -> Optional[str]:
         safe_diagnostics = _safe_error(json.dumps(diagnostics, sort_keys=True))
         return f"hindsight-embed command not found in dashboard environment; diagnostics={safe_diagnostics}"
     cmd = [binary, "-p", profile, "daemon", "start"]
-    env = os.environ.copy()
-    env["HERMES_HOME"] = str(_hermes_home())
+    env = _profile_child_env()
     try:
         result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
     except FileNotFoundError:
@@ -1712,7 +1787,10 @@ def _run_coro_blocking(coro: Any) -> Any:
         except BaseException as exc:  # pragma: no cover - re-raised in caller thread
             result["error"] = exc
 
-    thread = threading.Thread(target=runner, daemon=True)
+    # Provider code may resolve profile-local credentials inside this worker.
+    # A new thread does not inherit ContextVars unless they are copied.
+    context = copy_context()
+    thread = threading.Thread(target=lambda: context.run(runner), daemon=True)
     thread.start()
     thread.join()
     if "error" in result:
@@ -1986,7 +2064,7 @@ def _load_byterover_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
         plugin_cfg = {}
 
     def pick(key: str, env_key: str, default: Any = "") -> Any:
-        value = os.environ.get(env_key, default)
+        value = _env_value(env_key, default)
         if key in plugin_cfg and plugin_cfg.get(key) not in (None, ""):
             value = plugin_cfg.get(key)
         if key in file_cfg and file_cfg.get(key) not in (None, ""):
@@ -2064,6 +2142,7 @@ def _run_byterover_command(cfg: Dict[str, Any], args: List[str], *, timeout: int
         result = subprocess.run(
             [str(brv), *args],
             cwd=cwd if Path(cwd).exists() else "/tmp",
+            env=_profile_child_env(),
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
