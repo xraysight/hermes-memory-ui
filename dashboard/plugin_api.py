@@ -1172,20 +1172,24 @@ def _mnemosyne_table_exists(conn: sqlite3.Connection, table: str) -> bool:
         return False
 
 
+def _quote_sqlite_identifier(identifier: str) -> str:
+    """Return a safely double-quoted SQLite identifier."""
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def _mnemosyne_table_count(conn: sqlite3.Connection, table: str) -> int:
     if not _mnemosyne_table_exists(conn, table):
         return 0
     try:
-        quoted = table.replace('"', '""')
-        return int(conn.execute(f'SELECT COUNT(*) FROM "{quoted}"').fetchone()[0])
+        return int(conn.execute(f"SELECT COUNT(*) FROM {_quote_sqlite_identifier(table)}").fetchone()[0])
     except Exception:
         return 0
 
 
 def _mnemosyne_columns(conn: sqlite3.Connection, table: str) -> List[str]:
     try:
-        quoted = table.replace('"', '""')
-        return [str(row["name"]) for row in conn.execute(f'PRAGMA table_info("{quoted}")').fetchall()]
+        quoted_table = _quote_sqlite_identifier(table)
+        return [str(row["name"]) for row in conn.execute(f"PRAGMA table_info({quoted_table})").fetchall()]
     except Exception:
         return []
 
@@ -1205,8 +1209,7 @@ def _json_object(value: Any) -> Dict[str, Any]:
 def _mnemosyne_order_clause(columns: List[str], preferred: List[str]) -> str:
     for column in preferred:
         if column in columns:
-            quoted = column.replace('"', '""')
-            return f'ORDER BY "{quoted}" DESC'
+            return f"ORDER BY {_quote_sqlite_identifier(column)} DESC"
     return ""
 
 
@@ -1216,7 +1219,7 @@ def _mnemosyne_where(search: Optional[str], columns: List[str], candidates: List
     available = [column for column in candidates if column in columns]
     if not available:
         return "", []
-    where = "WHERE " + " OR ".join([f'"{column.replace(chr(34), chr(34) + chr(34))}" LIKE ?' for column in available])
+    where = "WHERE " + " OR ".join(f"{_quote_sqlite_identifier(column)} LIKE ?" for column in available)
     return where, [_safe_like(search)] * len(available)
 
 
@@ -1326,9 +1329,9 @@ def _mnemosyne_fetch_memories(
             continue
         where, params = _mnemosyne_where(search, columns, ["content", "source", "session_id", "metadata_json"])
         order = _mnemosyne_order_clause(columns, ["timestamp", "created_at", "rowid", "id"])
-        quoted_table = table.replace('"', '""')
-        quoted_columns = ", ".join(f'"{column.replace(chr(34), chr(34) + chr(34))}"' for column in selected)
-        sql = f'SELECT {quoted_columns} FROM "{quoted_table}" {where} {order} LIMIT ?'
+        quoted_table = _quote_sqlite_identifier(table)
+        quoted_columns = ", ".join(_quote_sqlite_identifier(column) for column in selected)
+        sql = f"SELECT {quoted_columns} FROM {quoted_table} {where} {order} LIMIT ?"
         try:
             fetched = [dict(row) for row in conn.execute(sql, params + [limit - len(rows)]).fetchall()]
         except Exception:
@@ -1364,9 +1367,9 @@ def _mnemosyne_fetch_facts(
             continue
         where, params = _mnemosyne_where(search, columns, search_columns)
         order = _mnemosyne_order_clause(columns, ["timestamp", "date", "created_at", "id", "event_id", "fact_id"])
-        quoted_table = table.replace('"', '""')
-        quoted_columns = ", ".join(f'"{column.replace(chr(34), chr(34) + chr(34))}"' for column in selected)
-        sql = f'SELECT {quoted_columns} FROM "{quoted_table}" {where} {order} LIMIT ?'
+        quoted_table = _quote_sqlite_identifier(table)
+        quoted_columns = ", ".join(_quote_sqlite_identifier(column) for column in selected)
+        sql = f"SELECT {quoted_columns} FROM {quoted_table} {where} {order} LIMIT ?"
         try:
             fetched = [dict(row) for row in conn.execute(sql, params + [limit - len(rows)]).fetchall()]
         except Exception:

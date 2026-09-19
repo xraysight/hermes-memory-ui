@@ -942,6 +942,51 @@ def create_mnemosyne_db(tmp_path):
     return db_path
 
 
+def test_mnemosyne_sql_identifier_quoting_handles_unusual_names_and_search(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    table = 'memory "archive" / α'
+    content_column = 'content "quoted" / β'
+    order_column = 'created at "UTC"'
+    quoted_table = module._quote_sqlite_identifier(table)
+    quoted_content = module._quote_sqlite_identifier(content_column)
+    quoted_order = module._quote_sqlite_identifier(order_column)
+
+    assert quoted_table == '"memory ""archive"" / α"'
+    assert quoted_content == '"content ""quoted"" / β"'
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(f"CREATE TABLE {quoted_table} ({quoted_content} TEXT, {quoted_order} TEXT)")
+    conn.executemany(
+        f"INSERT INTO {quoted_table} VALUES (?, ?)",
+        [("first needle", "2026-01-01"), ("newest needle", "2026-02-01"), ("unrelated", "2026-03-01")],
+    )
+
+    assert module._mnemosyne_table_exists(conn, table) is True
+    assert module._mnemosyne_table_count(conn, table) == 3
+    assert module._mnemosyne_columns(conn, table) == [content_column, order_column]
+
+    where, params = module._mnemosyne_where("needle", [content_column], [content_column])
+    order = module._mnemosyne_order_clause([order_column], [order_column])
+    rows = conn.execute(
+        f"SELECT {quoted_content} FROM {quoted_table} {where} {order}",
+        params,
+    ).fetchall()
+
+    assert params == ["%needle%"]
+    assert [row[content_column] for row in rows] == ["newest needle", "first needle"]
+
+    injection_where, injection_params = module._mnemosyne_where(
+        'needle" OR 1=1 --',
+        [content_column],
+        [content_column],
+    )
+    assert conn.execute(
+        f"SELECT {quoted_content} FROM {quoted_table} {injection_where}",
+        injection_params,
+    ).fetchall() == []
+
+
 def install_fake_mnemosyne_provider(monkeypatch, calls):
     fake_plugins = types.ModuleType("plugins")
     fake_memory = types.ModuleType("plugins.memory")
