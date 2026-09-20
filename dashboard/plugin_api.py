@@ -687,10 +687,30 @@ def _load_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
     rerank = pick("rerank", "MEM0_RERANK", True)
     if isinstance(rerank, str):
         rerank = rerank.strip().lower() not in {"0", "false", "no", "off"}
+
+    # Detect OSS mode: mem0.json has "mode": "oss" or contains an "oss" block.
+    oss_mode = (
+        str(file_cfg.get("mode") or "").strip().lower() == "oss"
+        or isinstance(file_cfg.get("oss"), dict)
+    )
+    # Issue #3: if mode=oss but no "oss" sub-block, treat the whole file_cfg
+    # (minus meta-keys) as the OSS config rather than silently falling back to
+    # Memory() defaults which would ignore all user configuration.
+    _oss_block = file_cfg.get("oss")
+    if isinstance(_oss_block, dict):
+        oss_config: Optional[Dict[str, Any]] = _oss_block
+    elif oss_mode:
+        # Flat layout: entire file is the config (minus the "mode" key).
+        oss_config = {k: v for k, v in file_cfg.items() if k != "mode"}
+    else:
+        oss_config = None
+
     return {
         "config_path": str(config_path),
         "config_exists": config_path.exists(),
         "api_key_present": bool(api_key),
+        "mem0_mode": "oss" if oss_mode else "cloud",
+        "oss_config": oss_config,
         "user_id": pick("user_id", "MEM0_USER_ID", "hermes-user"),
         "agent_id": pick("agent_id", "MEM0_AGENT_ID", "hermes"),
         "rerank": rerank,
@@ -754,6 +774,7 @@ def _mem0_payload(
         "label": "Mem0 memory",
         "provider_configured": provider == "mem0",
         "mode": "read-only",
+        "mem0_mode": mem0_cfg["mem0_mode"],
         "config_path": mem0_cfg["config_path"],
         "config_exists": mem0_cfg["config_exists"],
         "api_key_present": mem0_cfg["api_key_present"],
@@ -769,22 +790,71 @@ def _mem0_payload(
     }
 
     try:
-        if not mem0_cfg["api_key_present"]:
-            base["error"] = "Mem0 API key not configured. Set MEM0_API_KEY in $HERMES_HOME/.env or the process environment."
-            return base
+        if mem0_cfg["mem0_mode"] == "oss":
+            # OSS / self-hosted path: use mem0.Memory with the full config from mem0.json.
+            try:
+                from mem0 import Memory  # type: ignore
+            except ImportError:
+                base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai."
+                return base
 
-        try:
-            from mem0 import MemoryClient  # type: ignore
-        except ImportError:
-            base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai."
-            return base
-
-        client = MemoryClient(api_key=mem0_cfg["_api_key"])
-        filters = {"user_id": mem0_cfg["user_id"]}
-        if search:
-            response = client.search(query=search, filters=filters, rerank=mem0_cfg["rerank"], top_k=limit)
+            oss_cfg = mem0_cfg["oss_config"]
+            if oss_cfg:
+                # Issues #1 & #2: hoist import, catch ImportError explicitly,
+                # give a clean user-facing error instead of silently falling
+                # through to Memory(config=raw_dict) which always crashes.
+                try:
+                    from mem0.configs.base import MemoryConfig as _MemoryConfig  # type: ignore
+                except ImportError:
+                    base["error"] = "Could not import MemoryConfig from mem0. Ensure mem0ai is installed and up to date."
+                    return base
+                try:
+                    mem0_config: Any = _MemoryConfig.model_validate(oss_cfg)
+                except Exception:
+                    try:
+                        mem0_config = _MemoryConfig(**oss_cfg)
+                    except Exception as cfg_exc:
+                        base["error"] = f"Invalid OSS config in mem0.json: {_safe_error(cfg_exc)}"
+                        return base
+                client = Memory(config=mem0_config)
+            else:
+                client = Memory()
+            # Issue #4: apply agent_id filter consistently only when explicitly set
+            # (not the default "hermes") so OSS and cloud return the same scope.
+            oss_filters: Dict[str, Any] = {"user_id": mem0_cfg["user_id"]}
+            if mem0_cfg["agent_id"] and mem0_cfg["agent_id"] != "hermes":
+                oss_filters["agent_id"] = mem0_cfg["agent_id"]
+            if search:
+                response = client.search(
+                    query=search,
+                    filters=oss_filters,
+                    top_k=limit,
+                    rerank=mem0_cfg["rerank"],  # Issue #5: forward rerank to OSS search
+                )
+            else:
+                response = client.get_all(
+                    filters=oss_filters,
+                    top_k=limit,  # Issue #7: pass limit server-side, not just client-side
+                )
         else:
-            response = client.get_all(filters=filters)
+            # Cloud path: use MemoryClient with an API key.
+            if not mem0_cfg["api_key_present"]:
+                base["error"] = "Mem0 API key not configured. Set MEM0_API_KEY in $HERMES_HOME/.env or the process environment."
+                return base
+
+            try:
+                from mem0 import MemoryClient  # type: ignore
+            except ImportError:
+                base["error"] = "mem0 package not installed in the dashboard environment. Install mem0ai."
+                return base
+
+            client = MemoryClient(api_key=mem0_cfg["_api_key"])
+            filters = {"user_id": mem0_cfg["user_id"]}
+            if search:
+                response = client.search(query=search, filters=filters, rerank=mem0_cfg["rerank"], top_k=limit)
+            else:
+                response = client.get_all(filters=filters)
+
         all_memories = [_normalize_mem0_memory(item, index) for index, item in enumerate(_unwrap_mem0_results(response))]
         base["total_memories"] = len(all_memories)
         base["memories"] = _filter_mem0_memories(all_memories, None, limit)
@@ -2458,6 +2528,7 @@ async def status() -> Dict[str, Any]:
             "config_path": mem0_cfg["config_path"],
             "config_exists": mem0_cfg["config_exists"],
             "api_key_present": mem0_cfg["api_key_present"],
+            "mem0_mode": mem0_cfg["mem0_mode"],
             "user_id": mem0_cfg["user_id"],
             "agent_id": mem0_cfg["agent_id"],
             "provider_configured": _dig(config, "memory", "provider", default=None) == "mem0",

@@ -21,6 +21,42 @@ def load_plugin_api(monkeypatch, tmp_path):
     return module
 
 
+def test_load_mem0_config_uses_mem0_mode_oss_for_flat_oss_config(monkeypatch, tmp_path):
+    (tmp_path / "mem0.json").write_text(
+        json.dumps({"mode": "oss", "vector_store": {"provider": "qdrant"}, "agent_id": "agent-x"}),
+        encoding="utf-8",
+    )
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    cfg = module._load_mem0_config({})
+
+    assert cfg["mem0_mode"] == "oss"
+    assert cfg["oss_config"] == {"vector_store": {"provider": "qdrant"}, "agent_id": "agent-x"}
+
+
+def test_load_mem0_config_uses_mem0_mode_oss_for_nested_oss_config(monkeypatch, tmp_path):
+    (tmp_path / "mem0.json").write_text(
+        json.dumps({"mode": "cloud", "oss": {"vector_store": {"provider": "chroma"}}}),
+        encoding="utf-8",
+    )
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    cfg = module._load_mem0_config({})
+
+    assert cfg["mem0_mode"] == "oss"
+    assert cfg["oss_config"] == {"vector_store": {"provider": "chroma"}}
+
+
+def test_load_mem0_config_defaults_to_cloud_mem0_mode(monkeypatch, tmp_path):
+    (tmp_path / "mem0.json").write_text(json.dumps({"user_id": "u1"}), encoding="utf-8")
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    cfg = module._load_mem0_config({})
+
+    assert cfg["mem0_mode"] == "cloud"
+    assert cfg["oss_config"] is None
+
+
 def test_session_search_payload_uses_hermes_session_search_tool_without_source(monkeypatch, tmp_path):
     calls = []
 
