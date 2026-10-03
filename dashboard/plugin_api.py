@@ -1763,7 +1763,7 @@ def _ensure_hindsight_local_daemon(cfg: Dict[str, Any]) -> Optional[str]:
     cmd = [binary, "-p", profile, "daemon", "start"]
     env = _profile_child_env()
     try:
-        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except FileNotFoundError:
         safe_diagnostics = _safe_error(json.dumps(diagnostics, sort_keys=True))
         return f"hindsight-embed command not found in dashboard environment; diagnostics={safe_diagnostics}"
@@ -2151,6 +2151,7 @@ def _run_byterover_command(cfg: Dict[str, Any], args: List[str], *, timeout: int
             stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except Exception as exc:
         return {"ok": False, "error": _safe_error(exc), "data": None}
