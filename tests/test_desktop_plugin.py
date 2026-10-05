@@ -54,7 +54,7 @@ def test_desktop_plugin_registers_native_surfaces_and_scoped_api_calls():
     assert result["translatedKeys"] == ["title", "openMemory"]
     assert result["paletteDataId"] == "hermes-memory-ui.open"
     assert result["paletteNavigation"] == "/memory"
-    assert result["i18nLocales"] == ["en", "pl"]
+    assert result["i18nLocales"] == ["en", "pl", "zh"]
     assert result["normalizedFilters"] == {
         "category": "project",
         "limit": 2000,
