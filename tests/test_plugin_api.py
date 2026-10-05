@@ -5,12 +5,17 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 PLUGIN_API = Path(__file__).resolve().parents[1] / "dashboard" / "plugin_api.py"
 
 
 def load_plugin_api(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setitem(sys.modules, "hindsight_embed", None)
     fake_constants = types.ModuleType("hermes_constants")
     fake_constants.get_hermes_home = lambda: str(tmp_path)
     monkeypatch.setitem(sys.modules, "hermes_constants", fake_constants)
@@ -554,10 +559,14 @@ def install_fake_hindsight_provider(monkeypatch, calls):
             calls.append(("areflect", kwargs))
             return types.SimpleNamespace(text="Hindsight reflection")
 
+        def shutdown(self):
+            calls.append(("shutdown",))
+
     fake_hindsight.HindsightMemoryProvider = FakeProvider
     monkeypatch.setitem(sys.modules, "plugins", fake_plugins)
     monkeypatch.setitem(sys.modules, "plugins.memory", fake_memory)
     monkeypatch.setitem(sys.modules, "plugins.memory.hindsight", fake_hindsight)
+    return fake_memory, fake_hindsight
 
 
 def test_hindsight_config_status_hides_keys_and_reads_local_config(monkeypatch, tmp_path):
@@ -628,6 +637,184 @@ def test_hindsight_endpoint_precedence_prefers_file_then_api_env_then_daemon_env
     assert module._load_hindsight_config()["_api_url"] == "http://192.168.42.40:8888"
 
 
+def test_hindsight_native_home_is_isolated_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "launch-home"))
+    module = load_plugin_api(monkeypatch, tmp_path)
+    assert module.os.environ["HOME"] == str(tmp_path)
+    assert module.os.environ["USERPROFILE"] == str(tmp_path)
+
+
+@pytest.mark.parametrize("profile", ["work", "_work", "-work", "工作"])
+def test_hindsight_embedded_endpoint_uses_sdk_profile_url(monkeypatch, tmp_path, profile):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "profile": profile}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+    calls = []
+    sdk = types.ModuleType("hindsight_embed")
+
+    class Manager:
+        def get_url(self, profile):
+            calls.append(profile)
+            return "http://127.0.0.1:9177"
+
+    sdk.get_embed_manager = lambda: Manager()
+    monkeypatch.setitem(sys.modules, "hindsight_embed", sdk)
+
+    cfg = module._load_hindsight_config()
+    assert cfg["_api_url"] == "http://127.0.0.1:9177"
+    assert cfg["api_url"] == "http://127.0.0.1:9177"
+    assert calls == [profile]
+
+
+def test_hindsight_sdk_resolves_port_after_profile_env_loses_port_key(monkeypatch, tmp_path):
+    profile_env = tmp_path / ".hindsight" / "profiles" / "hermes.env"
+    profile_env.parent.mkdir(parents=True)
+    profile_env.write_text("HINDSIGHT_API_PORT=9177\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded"}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+    sdk = types.ModuleType("hindsight_embed")
+    calls = []
+
+    class Manager:
+        def get_url(self, profile):
+            calls.append(profile)
+            return "http://127.0.0.1:9177"
+
+    sdk.get_embed_manager = lambda: Manager()
+    monkeypatch.setitem(sys.modules, "hindsight_embed", sdk)
+    assert module._load_hindsight_config()["_api_url"] == "http://127.0.0.1:9177"
+    profile_env.write_text("HINDSIGHT_LLM_PROVIDER=openai\n", encoding="utf-8")
+    assert module._load_hindsight_config()["_api_url"] == "http://127.0.0.1:9177"
+    assert calls == ["hermes", "hermes"]
+
+
+def test_hindsight_sdk_url_is_redacted_in_public_status(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded"}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+    sdk = types.ModuleType("hindsight_embed")
+    sdk.get_embed_manager = lambda: types.SimpleNamespace(
+        get_url=lambda _profile: "http://user:pass@127.0.0.1:9177/?token=private"
+    )
+    monkeypatch.setitem(sys.modules, "hindsight_embed", sdk)
+
+    status = module._hindsight_payload(mode="status")
+    assert status["api_url"] == "http://[REDACTED]@127.0.0.1:9177/?token=[REDACTED]"
+    assert "private" not in json.dumps(status) and "user:pass" not in json.dumps(status)
+
+
+def test_hindsight_explicit_and_nonembedded_urls_skip_sdk_discovery(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    module = load_plugin_api(monkeypatch, tmp_path)
+    sdk = types.ModuleType("hindsight_embed")
+    discoveries = []
+    sdk.get_embed_manager = lambda: discoveries.append("unexpected discovery") or types.SimpleNamespace(
+        get_url=lambda _profile: "http://127.0.0.1:9177"
+    )
+    monkeypatch.setitem(sys.modules, "hindsight_embed", sdk)
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "api_url": "https://user:pass@example.test/?token=private"}), encoding="utf-8")
+    cfg = module._load_hindsight_config()
+    assert cfg["_api_url"] == "https://user:pass@example.test/?token=private"
+    assert "private" not in cfg["api_url"] and "user:pass" not in cfg["api_url"]
+    cfg_path.write_text(json.dumps({"mode": "local_embedded"}), encoding="utf-8")
+    monkeypatch.setenv("HINDSIGHT_DAEMON_URL", "http://192.0.2.20:8888")
+    assert module._load_hindsight_config()["_api_url"] == "http://192.0.2.20:8888"
+    monkeypatch.setenv("HINDSIGHT_API_URL", "http://192.0.2.30:8888")
+    assert module._load_hindsight_config()["_api_url"] == "http://192.0.2.30:8888"
+    monkeypatch.delenv("HINDSIGHT_API_URL")
+    monkeypatch.delenv("HINDSIGHT_DAEMON_URL")
+    cfg_path.write_text(json.dumps({"mode": "local_external"}), encoding="utf-8")
+    assert module._load_hindsight_config()["_api_url"] == "http://localhost:8888"
+    cfg_path.write_text(json.dumps({"mode": "cloud"}), encoding="utf-8")
+    assert module._load_hindsight_config()["_api_url"] == module.HINDSIGHT_DEFAULT_CLOUD_URL
+    assert discoveries == []
+
+
+@pytest.mark.parametrize("assignment", ["HINDSIGHT_API_PORT=9333", "export HINDSIGHT_API_PORT=9333"])
+@pytest.mark.parametrize("profile", ["work", "_work", "-work", "工作"])
+def test_hindsight_embedded_env_port_fallback_without_sdk(monkeypatch, tmp_path, profile, assignment):
+    profile_env = tmp_path / ".hindsight" / "profiles" / f"{profile}.env"
+    profile_env.parent.mkdir(parents=True)
+    profile_env.write_text(assignment + "\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "profile": profile}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._load_hindsight_config()["_api_url"] == "http://127.0.0.1:9333"
+
+
+def test_hindsight_embedded_env_port_fallback_after_sdk_failure(monkeypatch, tmp_path):
+    profile_env = tmp_path / ".hindsight" / "profiles" / "hermes.env"
+    profile_env.parent.mkdir(parents=True)
+    profile_env.write_text("HINDSIGHT_API_PORT=9444\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local"}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+    sdk = types.ModuleType("hindsight_embed")
+    sdk.get_embed_manager = lambda: (_ for _ in ()).throw(RuntimeError("SDK unavailable"))
+    monkeypatch.setitem(sys.modules, "hindsight_embed", sdk)
+
+    assert module._load_hindsight_config()["_api_url"] == "http://127.0.0.1:9444"
+
+
+def test_hindsight_embedded_env_fallback_isolated_by_home(monkeypatch, tmp_path):
+    for name, port in (("first", 9333), ("second", 9444)):
+        home = tmp_path / name
+        profile_env = home / ".hindsight" / "profiles" / "work.env"
+        profile_env.parent.mkdir(parents=True)
+        profile_env.write_text(f"HINDSIGHT_API_PORT={port}\n", encoding="utf-8")
+        cfg_path = home / "hindsight" / "config.json"
+        cfg_path.parent.mkdir()
+        cfg_path.write_text(json.dumps({"mode": "local_embedded", "profile": "work"}), encoding="utf-8")
+        module = load_plugin_api(monkeypatch, home)
+        assert module._load_hindsight_config()["_api_url"] == f"http://127.0.0.1:{port}"
+
+
+def test_hindsight_unsafe_profile_skips_sdk_lookup(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "profile": "../other"}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+    sdk = types.ModuleType("hindsight_embed")
+    calls = []
+    sdk.get_embed_manager = lambda: types.SimpleNamespace(
+        get_url=lambda profile: calls.append(profile) or "http://127.0.0.1:9177"
+    )
+    monkeypatch.setitem(sys.modules, "hindsight_embed", sdk)
+
+    assert module._load_hindsight_config()["_api_url"] == module.HINDSIGHT_DEFAULT_LOCAL_URL
+    assert calls == []
+
+
+@pytest.mark.parametrize("profile,port", [
+    ("../other", "9333"),
+    ("work/name", "9333"),
+    ("work", "0"),
+    ("work", "65536"),
+    ("work", "not-a-port"),
+    ("work", "9" * 5000),
+])
+def test_hindsight_embedded_env_fallback_rejects_unsafe_profile_or_port(monkeypatch, tmp_path, profile, port):
+    profile_env = tmp_path / ".hindsight" / "profiles" / "work.env"
+    profile_env.parent.mkdir(parents=True)
+    profile_env.write_text(f"HINDSIGHT_API_PORT={port}\n", encoding="utf-8")
+    cfg_path = tmp_path / "hindsight" / "config.json"
+    cfg_path.parent.mkdir()
+    cfg_path.write_text(json.dumps({"mode": "local_embedded", "profile": profile}), encoding="utf-8")
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._load_hindsight_config()["_api_url"] == module.HINDSIGHT_DEFAULT_LOCAL_URL
+
+
 def test_hindsight_local_daemon_uses_resolved_binary_when_path_is_constrained(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
     cfg_path = tmp_path / "hindsight" / "config.json"
@@ -644,6 +831,7 @@ def test_hindsight_local_daemon_uses_resolved_binary_when_path_is_constrained(mo
 
     module = load_plugin_api(monkeypatch, tmp_path)
     monkeypatch.setattr(module.sys, "executable", str(fake_executable))
+    monkeypatch.setattr(module.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "stale-profile"))
 
@@ -657,6 +845,31 @@ def test_hindsight_local_daemon_uses_resolved_binary_when_path_is_constrained(mo
     assert module._ensure_hindsight_local_daemon(cfg) is None
     assert calls[0][0] == [str(fake_hindsight_embed), "-p", "test-profile", "daemon", "start"]
     assert calls[0][1]["env"]["HERMES_HOME"] == str(tmp_path)
+    assert calls[0][1]["text"] is True
+    assert calls[0][1]["encoding"] == "utf-8"
+    assert calls[0][1]["errors"] == "replace"
+    assert calls[0][1]["timeout"] == 60
+    assert calls[0][1]["creationflags"] == getattr(module.subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def test_hindsight_daemon_start_decodes_invalid_output_and_redacts_error(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    real_run = module.subprocess.run
+    monkeypatch.setattr(module, "_resolve_hindsight_embed", lambda: ("synthetic-daemon", {}))
+
+    def run_synthetic(_cmd, **kwargs):
+        return real_run(
+            [sys.executable, "-B", "-c", "import sys; sys.stderr.buffer.write(b'\\xffdaemon reported api_key=private\\n'); sys.exit(1)"],
+            **kwargs,
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", run_synthetic)
+
+    error = module._ensure_hindsight_local_daemon({"mode": "local_embedded", "profile": "work", "_api_url": "http://127.0.0.1:9333"})
+
+    assert "daemon reported" in error
+    assert "api_key=[REDACTED]" in error
+    assert "private" not in error
 
 
 def test_hindsight_local_daemon_reports_safe_diagnostics_when_binary_missing(monkeypatch, tmp_path):
@@ -737,11 +950,11 @@ def test_hindsight_config_does_not_fall_back_outside_active_profile(monkeypatch,
         json.dumps({"apiKey": "other-profile-secret", "bank_id": "other-profile-bank"}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("HOME", str(system_home))
-
     active_profile = tmp_path / "active-profile"
     active_profile.mkdir()
     module = load_plugin_api(monkeypatch, active_profile)
+    monkeypatch.setenv("HOME", str(system_home))
+    monkeypatch.setenv("USERPROFILE", str(system_home))
     config = module._load_hindsight_config()
 
     assert config["config_path"] == str(active_profile / "hindsight" / "config.json")
@@ -770,6 +983,41 @@ def test_hindsight_recall_and_reflect_use_provider_without_retain(monkeypatch, t
     assert ("areflect", {"bank_id": "test-bank", "query": "dashboard", "budget": "high"}) in calls
     assert "secret" not in json.dumps(recall)
     assert not any(call and call[0] == "aretain" for call in calls)
+
+
+def test_hindsight_catalog_resolver_serves_recall_and_reflect(monkeypatch, tmp_path):
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")
+    calls = []
+    memory, catalog = install_fake_hindsight_provider(monkeypatch, calls)
+    catalog.__name__ = "_hermes_user_memory.hindsight__source_test"
+    memory.import_provider_module = lambda name: calls.append(("resolve", name)) or catalog
+    monkeypatch.delitem(sys.modules, "plugins.memory.hindsight")
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    recall = module._hindsight_payload(query="dashboard", mode="recall")
+    reflect = module._hindsight_payload(query="dashboard", mode="reflect")
+
+    assert recall["error"] is None and recall["result_count"] == 2
+    assert reflect["error"] is None and reflect["reflection"] == "Hindsight reflection"
+    assert [call for call in calls if call[0] == "resolve"] == [("resolve", "hindsight")] * 2
+    assert [call for call in calls if call[0] == "shutdown"] == [("shutdown",)] * 2
+    assert ("initialize", {"session_id": "dashboard", "hermes_home": str(tmp_path), "platform": "dashboard"}) in calls
+
+
+def test_hindsight_resolver_failure_is_redacted_without_bundled_fallback(monkeypatch, tmp_path):
+    memory, bundled = install_fake_hindsight_provider(monkeypatch, [])
+
+    def fail(_name):
+        raise RuntimeError("provider failed at https://user:pass@example.test/?api_key=private")
+
+    memory.import_provider_module = fail
+    module = load_plugin_api(monkeypatch, tmp_path)
+    result = module._hindsight_payload(query="dashboard", mode="recall")
+
+    assert "provider failed" in result["error"]
+    assert "private" not in json.dumps(result)
+    assert "user:pass" not in json.dumps(result)
+    assert "[REDACTED]" in result["error"]
 
 
 def test_hindsight_snapshot_and_status_include_config_without_querying(monkeypatch, tmp_path):
@@ -846,6 +1094,130 @@ def test_hindsight_contents_lists_client_memories_and_documents(monkeypatch, tmp
     assert any(call[0] == "list_memories" for call in calls)
     assert any(call[0] == "list_documents" for call in calls)
     assert not any("/v1/default" in str(call) for call in calls)
+
+
+@pytest.mark.parametrize("transport_error", [
+    ConnectionResetError("connection reset by peer"),
+    type("ClientConnectorError", (OSError,), {"__module__": "aiohttp.client_exceptions"})("Cannot connect to host localhost:9177"),
+    RuntimeError("Cannot connect to host localhost:9177"),
+])
+def test_hindsight_contents_retries_transport_with_fresh_closed_client(monkeypatch, tmp_path, transport_error):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    calls = []
+    client_module = types.ModuleType("hindsight_client")
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.number = len([call for call in calls if call[0] == "init"]) + 1
+            calls.append(("init", self.number, kwargs["base_url"]))
+
+        async def aclose(self):
+            calls.append(("close", self.number))
+
+    client_module.Hindsight = Client
+    monkeypatch.setitem(sys.modules, "hindsight_client", client_module)
+    monkeypatch.setattr(module, "_resolve_hindsight_embed", lambda: ("synthetic-daemon", {}))
+    monkeypatch.setattr(module.subprocess, "run", lambda *_args, **_kwargs: calls.append(("start",)) or types.SimpleNamespace(returncode=0))
+
+    async def fetch(client):
+        calls.append(("fetch", client.number))
+        if client.number == 1:
+            raise transport_error
+        return "ready"
+
+    cfg = {"mode": "local_embedded", "profile": "work", "_api_url": "http://127.0.0.1:9177"}
+    assert module._hindsight_client_call(cfg, fetch) == "ready"
+    assert calls == [
+        ("init", 1, "http://127.0.0.1:9177"), ("fetch", 1), ("close", 1),
+        ("start",), ("init", 2, "http://127.0.0.1:9177"), ("fetch", 2), ("close", 2),
+    ]
+
+
+def test_hindsight_contents_winerror_64_retries_once_and_closes_both(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    events = []
+    client_module = types.ModuleType("hindsight_client")
+
+    class Client:
+        def __init__(self, **_kwargs):
+            events.append("init")
+
+        async def aclose(self):
+            events.append("close")
+
+    client_module.Hindsight = Client
+    monkeypatch.setitem(sys.modules, "hindsight_client", client_module)
+    monkeypatch.setattr(module, "_ensure_hindsight_local_daemon", lambda _cfg: events.append("start") or None)
+
+    async def fail(_client):
+        events.append("fetch")
+        error = OSError("The specified network name is no longer available")
+        error.winerror = 64
+        raise error
+
+    cfg = {"mode": "local_embedded", "_api_url": "http://localhost:9177"}
+    with pytest.raises(OSError):
+        module._hindsight_client_call(cfg, fail)
+    assert events == ["init", "fetch", "close", "start", "init", "fetch", "close"]
+
+
+@pytest.mark.parametrize("mode,url,error", [
+    ("local_external", "http://127.0.0.1:8888", ConnectionRefusedError("connection refused")),
+    ("cloud", "https://example.test", ConnectionResetError("connection reset")),
+    ("local_embedded", "https://example.test", ConnectionResetError("connection reset")),
+    ("local_embedded", "http://localhost:9177", RuntimeError("authentication failed")),
+    ("local_embedded", "http://localhost:9177", ValueError("invalid request")),
+    ("local_embedded", "http://localhost:9177", type("HttpError", (Exception,), {"status_code": 401})("connection refused")),
+    ("local_embedded", "http://localhost:9177", type("ApiException", (Exception,), {"status": 403})("Cannot connect to upstream LLM")),
+])
+def test_hindsight_contents_does_not_retry_remote_or_nontransport(monkeypatch, tmp_path, mode, url, error):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    events = []
+    client_module = types.ModuleType("hindsight_client")
+
+    class Client:
+        def __init__(self, **_kwargs):
+            events.append("init")
+
+        async def aclose(self):
+            events.append("close")
+
+    client_module.Hindsight = Client
+    monkeypatch.setitem(sys.modules, "hindsight_client", client_module)
+    monkeypatch.setattr(module, "_ensure_hindsight_local_daemon", lambda _cfg: events.append("start") or None)
+
+    async def fail(_client):
+        events.append("fetch")
+        raise error
+
+    with pytest.raises(type(error)):
+        module._hindsight_client_call({"mode": mode, "_api_url": url}, fail)
+    assert events == ["init", "fetch", "close"]
+
+
+def test_hindsight_contents_start_failure_stops_after_first_client(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    events = []
+    client_module = types.ModuleType("hindsight_client")
+
+    class Client:
+        def __init__(self, **_kwargs):
+            events.append("init")
+
+        async def aclose(self):
+            events.append("close")
+
+    client_module.Hindsight = Client
+    monkeypatch.setitem(sys.modules, "hindsight_client", client_module)
+    monkeypatch.setattr(module, "_ensure_hindsight_local_daemon", lambda _cfg: events.append("start") or "daemon failed")
+
+    async def fail(_client):
+        events.append("fetch")
+        raise ConnectionRefusedError("connection refused")
+
+    with pytest.raises(RuntimeError, match="daemon failed"):
+        module._hindsight_client_call({"mode": "local_embedded", "_api_url": "http://localhost:9177"}, fail)
+    assert events == ["init", "fetch", "close", "start"]
 
 
 def test_hindsight_recall_does_not_fall_back_to_documents(monkeypatch, tmp_path):
