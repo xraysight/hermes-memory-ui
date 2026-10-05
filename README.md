@@ -370,7 +370,7 @@ It does not expose `mnemosyne_remember`, `mnemosyne_sleep`, `mnemosyne_update`, 
 
 ## Hindsight configuration
 
-Hindsight support follows Hermes' bundled `hindsight` memory provider convention. The plugin reads non-secret configuration from:
+Hindsight support uses the active Hermes `hindsight` memory provider, whether installed from the catalog or bundled by an older host. The plugin reads configuration from the active Hermes profile:
 
 - `$HERMES_HOME/hindsight/config.json`
 - environment variables such as `HINDSIGHT_MODE`, `HINDSIGHT_API_URL`, `HINDSIGHT_DAEMON_URL`, `HINDSIGHT_BANK_ID`, and `HINDSIGHT_BUDGET`
@@ -378,18 +378,20 @@ Hindsight support follows Hermes' bundled `hindsight` memory provider convention
 The daemon/API endpoint is resolved with this precedence:
 
 ```text
-hindsight/config.json api_url > HINDSIGHT_API_URL > HINDSIGHT_DAEMON_URL > default
+hindsight/config.json api_url > scoped HINDSIGHT_API_URL > scoped HINDSIGHT_DAEMON_URL > mode default
 ```
 
-For `local_embedded`, the default endpoint is `http://localhost:8888`. If the resolved endpoint is remote, for example `HINDSIGHT_DAEMON_URL=http://192.168.42.20:8888`, the backend treats that daemon as authoritative and does not try to start `hindsight-embed daemon start` on the serving host. Local daemon startup is attempted only for `localhost`, `127.0.0.1`, or `::1` endpoints.
+For `local_embedded` (also selected by the `local` alias), the mode default is the optional `hindsight_embed` SDK's `get_embed_manager().get_url(profile)`, using the configured profile name or `hermes`. This resolves the named profile's port from SDK configuration, metadata, or allocation; a named profile may use a port other than 8888. If the SDK is unavailable or its lookup fails, the plugin reads `HINDSIGHT_API_PORT` from `~/.hindsight/profiles/<profile>.env` for a safe profile name and valid port, then falls back to `http://localhost:8888`. The env fallback cannot recover a port after an env rewrite removes that key; the SDK remains authoritative when available. It does not guarantee preservation of a deleted custom port. `local_external` defaults to `http://localhost:8888`, and `cloud` defaults to the Hindsight Cloud URL. Explicit endpoint overrides skip SDK and profile env discovery in every mode.
 
-Opening the Hindsight section automatically loads its contents. If a configured local embedded endpoint refuses the connection, that read path may start the local `hindsight-embed` daemon before retrying. “Read-only” means the plugin exposes no memory mutation operation; it does not mean that local provider process management is disabled.
+Endpoint discovery does not start or stop a daemon, initialize the provider, or call its API. The SDK manager constructor may create `~/.hindsight/profiles` while resolving the URL. A remote endpoint, for example `HINDSIGHT_DAEMON_URL=http://192.168.42.20:8888`, is used as configured and does not trigger local daemon startup.
+
+Opening the Hindsight section automatically loads its contents. If a local embedded loopback connection is refused, reset, or disconnected, that read path may run `hindsight-embed daemon start` and retry once with a fresh client. Each attempt closes its client. Authentication, validation, and normal HTTP errors are not retried. Remote, `local_external`, and `cloud` endpoints never start a daemon. "Read-only" means the plugin exposes no memory mutation operation; local process startup can still occur during a contents read.
 
 When local daemon startup is needed, the plugin resolves `hindsight-embed` from `PATH`, the current Python environment, Hermes' bundled venv under `$HERMES_HOME/hermes-agent/venv/bin`, the default `~/.hermes/hermes-agent/venv/bin`, or `~/.local/bin`. If the binary cannot be found, the error includes safe diagnostics for `PATH`, `sys.executable`, and checked paths.
 
 Secrets such as `HINDSIGHT_API_KEY` and `HINDSIGHT_LLM_API_KEY` are only detected as boolean `*_present` flags and are never returned in plugin responses. Hindsight is query-oriented rather than a complete list API, so the interfaces only call recall/reflect after the user clicks a button. `/snapshot` includes status/config only; the interfaces may separately load the read-only `/hindsight/contents` view on page mount.
 
-The plugin performs read-only/query-only calls through Hermes' Hindsight provider internals and the official `hindsight_client` SDK:
+Recall and reflect resolve Hermes' installed Hindsight provider through the host provider resolver, with a bundled import fallback for older hosts that lack that resolver. Contents use the official `hindsight_client` SDK. The calls are:
 
 - `HindsightMemoryProvider.initialize(...)`
 - `client.arecall(...)` for explicit recall
@@ -567,7 +569,7 @@ The plugin script is loading before or outside the Hermes dashboard plugin runti
 - Mem0 API mode depends on the `mem0ai` package being installed in the serving Hermes environment and a configured Mem0 API key.
 - Local `mem0.Memory` stores are not supported; this plugin mirrors Hermes' current cloud/API-oriented Mem0 provider.
 - Honcho support depends on Hermes' bundled Honcho provider helpers and a configured Honcho API key or base URL.
-- Hindsight support depends on Hermes' bundled Hindsight provider helpers and a configured Hindsight Cloud/local setup.
+- Hindsight recall and reflect require an installed Hermes Hindsight provider (catalog or older bundled copy) and a configured Hindsight Cloud/local setup. Contents require `hindsight_client`; embedded endpoint discovery uses `hindsight_embed` when available and has a limited env/default fallback.
 - ByteRover support depends on the `brv` CLI being available in the serving Hermes environment and, for project-specific status/search, a configured or auto-detected ByteRover project.
 - No pagination yet; use `limit` filter.
 

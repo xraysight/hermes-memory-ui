@@ -11,6 +11,7 @@ maintenance, and provider-specific semantics are preserved.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import json
 import os
@@ -208,6 +209,8 @@ def _load_simple_env_file(path: Path) -> Dict[str, str]:
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             text = line.strip()
+            if text.startswith("export "):
+                text = text[7:].strip()
             if not text or text.startswith("#") or "=" not in text:
                 continue
             key, value = text.split("=", 1)
@@ -1630,15 +1633,22 @@ def _load_hindsight_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
     mode = str(file_cfg.get("mode") or _env_value("HINDSIGHT_MODE", "cloud") or "cloud")
     if mode == "local":
         mode = "local_embedded"
+    profile = str(file_cfg.get("profile") or "hermes")
     api_key = file_cfg.get("apiKey") or file_cfg.get("api_key") or _env_value("HINDSIGHT_API_KEY", "")
     llm_key = file_cfg.get("llmApiKey") or file_cfg.get("llm_api_key") or _env_value("HINDSIGHT_LLM_API_KEY", "")
-    default_url = HINDSIGHT_DEFAULT_LOCAL_URL if mode in {"local_embedded", "local_external"} else HINDSIGHT_DEFAULT_CLOUD_URL
-    api_url = (
+    explicit_url = (
         file_cfg.get("api_url")
         or _env_value("HINDSIGHT_API_URL", "")
         or _env_value("HINDSIGHT_DAEMON_URL", "")
-        or default_url
     )
+    if explicit_url:
+        api_url = explicit_url
+    elif mode == "local_embedded":
+        api_url = _hindsight_embedded_url(profile)
+    elif mode == "local_external":
+        api_url = HINDSIGHT_DEFAULT_LOCAL_URL
+    else:
+        api_url = HINDSIGHT_DEFAULT_CLOUD_URL
     banks = file_cfg.get("banks") if isinstance(file_cfg.get("banks"), dict) else {}
     hermes_bank = banks.get("hermes") if isinstance(banks.get("hermes"), dict) else {}
     bank_id = file_cfg.get("bank_id") or hermes_bank.get("bankId") or _env_value("HINDSIGHT_BANK_ID", "hermes")
@@ -1674,11 +1684,31 @@ def _load_hindsight_config(config: Optional[Dict[str, Any]] = None) -> Dict[str,
         "retain_every_n_turns": file_cfg.get("retain_every_n_turns", 1),
         "timeout": file_cfg.get("timeout") if file_cfg.get("timeout") is not None else _env_value("HINDSIGHT_TIMEOUT", "120"),
         "idle_timeout": file_cfg.get("idle_timeout") if file_cfg.get("idle_timeout") is not None else _env_value("HINDSIGHT_IDLE_TIMEOUT", "300"),
-        "profile": file_cfg.get("profile", "hermes"),
+        "profile": profile,
         "_api_url": str(api_url),
         "_api_key": api_key,
         "_file_config": file_cfg,
     }
+
+
+def _hindsight_embedded_url(profile: str) -> str:
+    """Resolve a named embedded daemon endpoint without starting the daemon."""
+    # Match the SDK's profile-name rules while excluding path separators.
+    if not profile.replace("-", "").replace("_", "").isalnum():
+        return HINDSIGHT_DEFAULT_LOCAL_URL
+    try:
+        from hindsight_embed import get_embed_manager  # type: ignore
+        return str(get_embed_manager().get_url(profile))
+    except Exception:
+        pass
+
+    profile_env = Path.home() / ".hindsight" / "profiles" / f"{profile}.env"
+    port_text = _load_simple_env_file(profile_env).get("HINDSIGHT_API_PORT", "")
+    if re.fullmatch(r"[0-9]{1,5}", port_text):
+        port = int(port_text)
+        if 1 <= port <= 65535:
+            return f"http://127.0.0.1:{port}"
+    return HINDSIGHT_DEFAULT_LOCAL_URL
 
 
 def _normalize_hindsight_result(item: Any, index: int) -> Dict[str, Any]:
@@ -1763,7 +1793,10 @@ def _ensure_hindsight_local_daemon(cfg: Dict[str, Any]) -> Optional[str]:
     cmd = [binary, "-p", profile, "daemon", "start"]
     env = _profile_child_env()
     try:
-        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = subprocess.run(
+            cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
     except FileNotFoundError:
         safe_diagnostics = _safe_error(json.dumps(diagnostics, sort_keys=True))
         return f"hindsight-embed command not found in dashboard environment; diagnostics={safe_diagnostics}"
@@ -1809,8 +1842,21 @@ def _hindsight_timeout_seconds(cfg: Dict[str, Any]) -> float:
 
 
 def _hindsight_connection_failed(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return "connection refused" in text or "cannot connect" in text or "connect call failed" in text
+    if any(getattr(exc, attr, None) is not None for attr in ("status_code", "status", "response")):
+        return False
+    if isinstance(exc, ConnectionError) or getattr(exc, "winerror", None) == 64:
+        return True
+    message = str(exc).lower()
+    if any(marker in message for marker in (
+        "connection refused", "cannot connect", "connect call failed",
+        "winerror 64", "specified network name is no longer available",
+    )):
+        return True
+    module_name = type(exc).__module__
+    return module_name.startswith(("httpx", "httpcore", "requests.exceptions", "aiohttp.client_exceptions")) and type(exc).__name__ in {
+        "ConnectError", "ReadError", "RemoteProtocolError", "ConnectionError", "ClientConnectionError",
+        "ServerDisconnectedError", "ClientOSError",
+    }
 
 
 def _hindsight_client_call(cfg: Dict[str, Any], fn: Callable[[Any], Any]) -> Any:
@@ -1833,7 +1879,7 @@ def _hindsight_client_call(cfg: Dict[str, Any], fn: Callable[[Any], Any]) -> Any
     try:
         return _run_coro_blocking(invoke())
     except Exception as exc:
-        if _hindsight_connection_failed(exc):
+        if _hindsight_should_manage_local_daemon(cfg) and _hindsight_connection_failed(exc):
             start_error = _ensure_hindsight_local_daemon(cfg)
             if start_error:
                 raise RuntimeError(start_error) from exc
@@ -1964,9 +2010,14 @@ def _hindsight_contents_payload(
 
 
 def _make_hindsight_provider() -> Any:
-    from plugins.memory.hindsight import HindsightMemoryProvider  # type: ignore
+    memory = importlib.import_module("plugins.memory")
+    resolver = getattr(memory, "import_provider_module", None)
+    if callable(resolver):
+        provider_module = resolver("hindsight")
+    else:
+        provider_module = importlib.import_module("plugins.memory.hindsight")
 
-    provider = HindsightMemoryProvider()
+    provider = provider_module.HindsightMemoryProvider()
     provider.initialize(session_id="dashboard", hermes_home=str(_hermes_home()), platform="dashboard")
     return provider
 

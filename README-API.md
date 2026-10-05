@@ -188,11 +188,11 @@ curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/byterover/query?query=d
 
 ### GET `/hindsight`
 
-Returns Hindsight provider status/config only. It does not run recall or reflect.
+Returns Hindsight provider status/config only. It does not run recall, reflect, or daemon startup. Embedded endpoint discovery may construct the optional SDK manager, which can create `~/.hindsight/profiles`.
 
 ### GET `/hindsight/contents`
 
-Lists Hindsight memory units and retained source documents through the official `hindsight_client` SDK. This is read-only. The UI loads it for the Hindsight section and also provides a manual `Refresh contents` action.
+Lists Hindsight memory units and retained source documents through the official `hindsight_client` SDK. It does not mutate memory. For a local embedded loopback transport failure, it may start the daemon and retry once. The UI loads it for the Hindsight section and also provides a manual `Refresh contents` action.
 
 Query parameters:
 
