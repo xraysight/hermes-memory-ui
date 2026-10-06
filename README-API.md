@@ -85,12 +85,17 @@ curl 'http://127.0.0.1:9119/api/plugins/hermes-memory-ui/holographic?limit=100&m
 
 ### GET `/mem0`
 
-Returns read-only memories from the Mem0 Platform API.
+Returns read-only memories from Mem0. `$HERMES_HOME/mem0.json` decides which client is
+used: a `host` pointing anywhere other than the Mem0 Platform (`api.mem0.ai`) is read over
+that self-hosted server's own REST API (`GET /memories`, `POST /search`, `X-API-Key`), and
+only a missing/platform host falls back to the Platform API via `MemoryClient`.
 
 Query parameters:
 
-- `limit`: 1-2000, default 500
+- `limit`: 1-2000, default 500 (self-hosted servers reject `top_k >= 2000`, so those reads cap at 1000)
 - `search`: optional search query; uses Mem0 semantic search
+
+The payload reports the resolved `host` and a `self_hosted` flag alongside the memories.
 
 Example:
 
