@@ -185,7 +185,11 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        import yaml
+        try:
+            import yaml
+        except ImportError:
+            # Newer Hermes runtimes provide their own YAML parser.
+            import hermes_yaml as yaml
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return data if isinstance(data, dict) else {}
     except Exception:
