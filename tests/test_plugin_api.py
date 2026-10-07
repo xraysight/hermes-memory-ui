@@ -494,6 +494,38 @@ def test_honcho_payload_hides_api_key_and_fetches_peer_context(monkeypatch, tmp_
     assert ("context", "hermes", {"target": "hermes", "search_query": "xraysight", "search_top_k": 5}) in calls
 
 
+def test_honcho_payload_resolves_externally_installed_provider(monkeypatch, tmp_path):
+    """Honcho installed as a catalog plugin is not importable as plugins.memory.honcho.
+
+    Hermes loads it under a synthetic namespace and exposes it through
+    plugins.memory.import_provider_module, the same resolver used for Hindsight.
+    """
+    (tmp_path / "config.yaml").write_text("memory:\n  provider: honcho\n", encoding="utf-8")
+    (tmp_path / "honcho.json").write_text(json.dumps({"apiKey": "honcho-secret"}), encoding="utf-8")
+    calls = []
+    install_fake_honcho_client(monkeypatch, tmp_path, calls)
+    external_client = sys.modules["plugins.memory.honcho.client"]
+    external_client.__name__ = "_hermes_user_memory.honcho__source_test.client"
+    monkeypatch.delitem(sys.modules, "plugins.memory.honcho")
+    monkeypatch.delitem(sys.modules, "plugins.memory.honcho.client")
+    resolved = []
+
+    def import_provider_module(name, submodule=None):
+        resolved.append((name, submodule))
+        return external_client
+
+    sys.modules["plugins.memory"].import_provider_module = import_provider_module
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    payload = module._honcho_payload(limit=5)
+
+    assert payload["error"] is None
+    assert payload["provider_configured"] is True
+    assert payload["user"]["card"] == ["Card fact for xraysight"]
+    assert ("honcho", "client") in resolved
+    assert "honcho-secret" not in json.dumps(payload)
+
+
 def test_honcho_snapshot_and_status_include_provider_without_secrets(monkeypatch, tmp_path):
     (tmp_path / "config.yaml").write_text("memory:\n  provider: honcho\n", encoding="utf-8")
     (tmp_path / "honcho.json").write_text(json.dumps({"apiKey": "honcho-secret"}), encoding="utf-8")
