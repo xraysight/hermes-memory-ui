@@ -896,7 +896,8 @@ def _honcho_config_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str,
         "_import_error": None,
     }
     try:
-        from plugins.memory.honcho.client import HonchoClientConfig, resolve_config_path  # type: ignore
+        _honcho_client = _honcho_client_module()
+        HonchoClientConfig, resolve_config_path = _honcho_client.HonchoClientConfig, _honcho_client.resolve_config_path
 
         cfg = HonchoClientConfig.from_global_config()
         path = resolve_config_path()
@@ -1102,7 +1103,7 @@ def _honcho_payload(
         base["error"] = "Honcho API key or base URL is not configured. Run 'hermes honcho setup' or set HONCHO_API_KEY / HONCHO_BASE_URL."
         return base
     try:
-        from plugins.memory.honcho.client import get_honcho_client  # type: ignore
+        get_honcho_client = _honcho_client_module().get_honcho_client
 
         client = get_honcho_client(cfg)
         user_peer_id = str(honcho_cfg["user_peer"] or "user")
@@ -2007,6 +2008,15 @@ def _hindsight_contents_payload(
     except Exception as exc:
         base["error"] = _safe_error(exc)
     return base
+
+
+def _honcho_client_module() -> Any:
+    """Honcho client module from whichever copy is installed (core or catalog plugin)."""
+    memory = importlib.import_module("plugins.memory")
+    resolver = getattr(memory, "import_provider_module", None)
+    if callable(resolver):
+        return resolver("honcho", "client")
+    return importlib.import_module("plugins.memory.honcho.client")
 
 
 def _make_hindsight_provider() -> Any:
