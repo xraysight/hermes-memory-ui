@@ -1397,6 +1397,9 @@ def install_fake_mnemosyne_provider(monkeypatch, calls):
     fake_mnemosyne = types.ModuleType("plugins.memory.mnemosyne")
 
     class FakeProvider:
+        def __init__(self):
+            calls.append(("construct",))
+
         def initialize(self, session_id, **kwargs):
             calls.append(("initialize", session_id, kwargs))
 
@@ -1425,6 +1428,106 @@ def install_fake_mnemosyne_provider(monkeypatch, calls):
     monkeypatch.setitem(sys.modules, "plugins", fake_plugins)
     monkeypatch.setitem(sys.modules, "plugins.memory", fake_memory)
     monkeypatch.setitem(sys.modules, "plugins.memory.mnemosyne", fake_mnemosyne)
+
+
+def test_mnemosyne_loader_uses_catalog_resolver_without_lifecycle(monkeypatch, tmp_path):
+    calls = []
+    install_fake_mnemosyne_provider(monkeypatch, calls)
+    catalog = sys.modules["plugins.memory.mnemosyne"]
+    monkeypatch.setitem(sys.modules, "plugins.memory.mnemosyne", None)
+    memory = sys.modules["plugins.memory"]
+    memory.import_provider_module = lambda name: calls.append(("resolve", name)) or catalog
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._load_mnemosyne_provider_class() is catalog.MnemosyneMemoryProvider
+    assert calls == [("resolve", "mnemosyne")]
+
+
+@pytest.mark.parametrize("use_resolver", [True, False])
+def test_mnemosyne_loader_unwraps_catalog_registration_without_calling_it(monkeypatch, tmp_path, use_resolver):
+    calls = []
+    install_fake_mnemosyne_provider(monkeypatch, calls)
+    provider_cls = sys.modules["plugins.memory.mnemosyne"].MnemosyneMemoryProvider
+    implementation_file = tmp_path / "mnemosyne_hermes.py"
+    implementation_file.write_text(
+        "def register_memory_provider(ctx):\n"
+        "    calls.append(('register_memory_provider',))\n"
+        "    raise AssertionError('Registration must not run during class loading')\n"
+        "register = register_memory_provider\n",
+        encoding="utf-8",
+    )
+    spec = importlib.util.spec_from_file_location("mnemosyne_hermes", implementation_file)
+    assert spec is not None and spec.loader is not None
+    implementation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(implementation)
+    implementation.MnemosyneMemoryProvider = provider_cls
+    implementation.calls = calls
+    monkeypatch.setitem(sys.modules, "mnemosyne_hermes", implementation)
+    monkeypatch.setitem(sys.modules, "plugins.memory.mnemosyne", None)
+    monkeypatch.setitem(sys.modules, "hermes_memory_provider", None)
+    plugin_file = tmp_path / "plugins" / "mnemosyne" / "__init__.py"
+    plugin_file.parent.mkdir(parents=True)
+    plugin_file.write_text(
+        "from mnemosyne_hermes import register, register_memory_provider\n"
+        "__all__ = ['register', 'register_memory_provider']\n",
+        encoding="utf-8",
+    )
+    if use_resolver:
+        spec = importlib.util.spec_from_file_location("fixture_mnemosyne_catalog", plugin_file)
+        assert spec is not None and spec.loader is not None
+        wrapper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wrapper)
+        memory = sys.modules["plugins.memory"]
+        memory.import_provider_module = lambda name: calls.append(("resolve", name)) or wrapper
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._load_mnemosyne_provider_class() is implementation.MnemosyneMemoryProvider
+    assert calls == ([("resolve", "mnemosyne")] if use_resolver else [])
+
+    recall = module._mnemosyne_payload(query="catalog", limit=2, mode="recall")
+    prefetch = module._mnemosyne_payload(query="catalog", mode="prefetch")
+    assert recall["error"] is None
+    assert recall["results"][0]["text"] == "Mnemosyne recall result"
+    assert prefetch["error"] is None
+    assert prefetch["context"] == "Injected Mnemosyne context for catalog"
+    assert sum(call[0] == "construct" for call in calls) == 2
+    assert sum(call[0] == "initialize" for call in calls) == 2
+    assert sum(call[0] == "shutdown" for call in calls) == 2
+    assert not any(call[0] == "register_memory_provider" for call in calls)
+
+
+@pytest.mark.parametrize("error_type", [ImportError, RuntimeError])
+def test_mnemosyne_resolver_errors_do_not_use_legacy_fallback(monkeypatch, tmp_path, error_type):
+    calls = []
+    install_fake_mnemosyne_provider(monkeypatch, calls)
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    def fail(name):
+        calls.append(("resolve", name))
+        raise error_type("catalog provider unavailable: api_key=fixture-secret")
+
+    sys.modules["plugins.memory"].import_provider_module = fail
+    with pytest.raises(error_type, match="catalog provider unavailable"):
+        module._load_mnemosyne_provider_class()
+    payload = module._mnemosyne_payload(query="catalog", mode="recall")
+    assert "catalog provider unavailable" in payload["error"]
+    assert "fixture-secret" not in payload["error"]
+    assert calls == [("resolve", "mnemosyne"), ("resolve", "mnemosyne")]
+
+
+@pytest.mark.parametrize("package_name", ["mnemosyne_hermes", "hermes_memory_provider"])
+def test_mnemosyne_loader_supports_standalone_packages_on_older_hosts(monkeypatch, tmp_path, package_name):
+    calls = []
+    install_fake_mnemosyne_provider(monkeypatch, calls)
+    implementation = sys.modules["plugins.memory.mnemosyne"]
+    monkeypatch.setitem(sys.modules, "plugins.memory.mnemosyne", None)
+    monkeypatch.setitem(sys.modules, "mnemosyne_hermes", None)
+    monkeypatch.setitem(sys.modules, "hermes_memory_provider", None)
+    monkeypatch.setitem(sys.modules, package_name, implementation)
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._load_mnemosyne_provider_class() is implementation.MnemosyneMemoryProvider
+    assert calls == []
 
 
 def test_mnemosyne_contents_reads_local_db_without_writes(monkeypatch, tmp_path):

@@ -1467,7 +1467,27 @@ def _mnemosyne_contents_payload(
     return base
 
 
+def _mnemosyne_provider_class(module: Any) -> Any:
+    provider_cls = getattr(module, "MnemosyneMemoryProvider", None)
+    if provider_cls is not None:
+        return provider_cls
+    # Catalog wrappers re-export registration hooks, not the provider class.
+    # Inspect the hook's defining module; never invoke registration to find it.
+    register = module.register_memory_provider
+    implementation = importlib.import_module(register.__module__)
+    return implementation.MnemosyneMemoryProvider
+
+
 def _load_mnemosyne_provider_class() -> Any:
+    # Newer hosts resolve catalog-installed providers outside plugins.memory.
+    # Only older hosts without the resolver use the legacy import paths below.
+    try:
+        from plugins.memory import import_provider_module  # type: ignore
+    except ImportError:
+        pass
+    else:
+        return _mnemosyne_provider_class(import_provider_module("mnemosyne"))
+
     errors: List[str] = []
     try:
         from plugins.memory.mnemosyne import MnemosyneMemoryProvider  # type: ignore
@@ -1483,18 +1503,15 @@ def _load_mnemosyne_provider_class() -> Any:
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
-                provider_cls = getattr(module, "MnemosyneMemoryProvider", None)
-                if provider_cls is not None:
-                    return provider_cls
+                return _mnemosyne_provider_class(module)
         except Exception as exc:
             errors.append(f"{plugin_file}: {_safe_error(exc)}")
 
-    try:
-        from hermes_memory_provider import MnemosyneMemoryProvider  # type: ignore
-
-        return MnemosyneMemoryProvider
-    except Exception as exc:
-        errors.append(f"hermes_memory_provider: {_safe_error(exc)}")
+    for package_name in ("mnemosyne_hermes", "hermes_memory_provider"):
+        try:
+            return _mnemosyne_provider_class(importlib.import_module(package_name))
+        except Exception as exc:
+            errors.append(f"{package_name}: {_safe_error(exc)}")
 
     raise RuntimeError("Mnemosyne provider is not available in the dashboard environment: " + "; ".join(errors))
 
