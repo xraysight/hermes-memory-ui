@@ -26,6 +26,45 @@ def load_plugin_api(monkeypatch, tmp_path):
     return module
 
 
+@pytest.mark.parametrize("pyyaml_available", [True, False], ids=["legacy-pyyaml", "host-yaml"])
+def test_config_reads_memory_settings_with_available_yaml_parser(monkeypatch, tmp_path, pyyaml_available):
+    import yaml
+
+    if pyyaml_available:
+        # Older hosts have PyYAML but no Hermes parser module.
+        monkeypatch.setitem(sys.modules, "hermes_yaml", None)
+    else:
+        # Use a real YAML parser behind the host interface, without requiring
+        # Hermes core in the standalone test environment.
+        host_yaml = types.ModuleType("hermes_yaml")
+        host_yaml.safe_load = yaml.safe_load
+        monkeypatch.setitem(sys.modules, "hermes_yaml", host_yaml)
+        monkeypatch.setitem(sys.modules, "yaml", None)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "memory:\n"
+        "  provider: holographic\n"
+        "  memory_char_limit: 9000\n"
+        "  user_char_limit: 3000\n",
+        encoding="utf-8",
+    )
+    module = load_plugin_api(monkeypatch, tmp_path)
+
+    assert module._read_yaml(config_path) == {
+        "memory": {
+            "provider": "holographic",
+            "memory_char_limit": 9000,
+            "user_char_limit": 3000,
+        },
+    }
+    builtin = module._builtin_payload()
+    assert {store["id"]: store["char_limit"] for store in builtin["stores"]} == {
+        "memory": 9000,
+        "user": 3000,
+    }
+    assert module._holographic_payload()["provider_configured"] is True
+
+
 def test_session_search_payload_uses_hermes_session_search_tool_without_source(monkeypatch, tmp_path):
     calls = []
 
