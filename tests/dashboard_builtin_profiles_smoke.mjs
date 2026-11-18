@@ -79,10 +79,9 @@ let tree = render()
 assert.equal(shownBuiltin(tree).hermes_home, '/active')
 await flush()
 requests[0].resolve({ profiles: [
-  { name: 'current', label: 'Active profile' },
-  { name: 'default', label: 'default' },
-  { name: 'alpha', label: 'Alpha bot' },
-  { name: 'beta', label: 'Beta bot' }
+  { name: 'default' },
+  { name: 'alpha', bot_title: 'Alpha bot' },
+  { name: 'beta', display_name: 'Beta bot' }
 ] })
 await flush()
 tree = render()
@@ -92,8 +91,7 @@ tree = change(tree, 'alpha')
 assert.equal(shownBuiltin(tree), undefined, 'active files must disappear during selection')
 await flush()
 const alpha = latestMemoryRequest()
-assert.equal(new URL(alpha.url, 'http://test').searchParams.get('memory_profile'), 'alpha')
-assert.equal(new URL(alpha.url, 'http://test').searchParams.get('profile'), 'host-bot')
+assert.equal(new URL(alpha.url, 'http://test').searchParams.get('profile'), 'alpha')
 tree = change(tree, 'beta')
 await flush()
 alpha.resolve({ hermes_home: '/alpha', stores: [] })
@@ -113,8 +111,8 @@ assert.equal(shownBuiltin(tree).hermes_home, '/beta')
 walk(tree, node => node.type === 'Button').props.onClick()
 tree = render()
 await flush()
-requests.filter(request => request.url.includes('/builtin/profiles')).at(-1).resolve({
-  profiles: [{ name: 'current', label: 'Active profile' }]
+requests.filter(request => request.url.startsWith('/api/profiles')).at(-1).resolve({
+  profiles: []
 })
 latestMemoryRequest().reject(new Error('Profile beta disappeared'))
 await flush()
@@ -162,5 +160,5 @@ tree = render()
 assert.equal(shownBuiltin(tree), undefined)
 assert.ok(walk(tree, node => node.props?.error?.includes('host profile changed')),
   'stale host reply must expose a refresh action rather than loading forever')
-assert.equal(requests.every(request => new URL(request.url, 'http://test').searchParams.get('profile') === 'host-bot'), true)
+assert.equal(new URL(changedHostRequest.url, 'http://test').searchParams.get('profile'), 'alpha')
 console.log('Dashboard builtin profile selection: ok')

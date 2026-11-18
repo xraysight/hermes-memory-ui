@@ -19,8 +19,7 @@
   const useMemo = hooks.useMemo;
   const e = React.createElement;
 
-  // Dashboard's generic fetchJSON does not profile-scope /api/plugins. The
-  // selector projects its value into ?profile=. Read it after the host's
+  // Keep request and response tied to the Dashboard selector. Read it after the host's
   // parent effects have synchronized bare sidebar navigation, including the
   // first visit when this bundle has never observed a profile. Do not cache
   // selection: it can change while the plugin page is unmounted.
@@ -182,13 +181,16 @@
 
     useEffect(function () {
       let active = true;
-      fetchPluginJSON("/api/plugins/hermes-memory-ui/builtin/profiles")
+      fetchPluginJSON("/api/profiles")
         .then(function (payload) {
           if (active) {
             if (payload === STALE_PROFILE_RESPONSE) {
               setProfilesError("The host profile changed. Refresh built-in memory to reload profiles.");
             } else {
-              setProfiles(payload.profiles || [{ name: "current", label: "Active profile" }]);
+              setProfiles([{ name: "current", label: "Active profile" }].concat(
+                (payload.profiles || []).filter(function (item) { return item.name && item.name !== "current"; })
+                  .map(function (item) { return { name: item.name, label: item.bot_title || item.display_name || item.name }; })
+              ));
               setProfilesError(null);
             }
           }
@@ -201,7 +203,7 @@
       if (profile === "current" && revision === 0) return;
       let active = true;
       setError(null);
-      const path = "/api/plugins/hermes-memory-ui/builtin?memory_profile=" + encodeURIComponent(profile);
+      const path = "/api/plugins/hermes-memory-ui/builtin" + (profile === "current" ? "" : "?profile=" + encodeURIComponent(profile));
       fetchPluginJSON(path)
         .then(function (payload) {
           if (active) {

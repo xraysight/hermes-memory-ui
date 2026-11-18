@@ -104,12 +104,11 @@ def test_desktop_plugin_registers_native_surfaces_and_scoped_api_calls():
     assert result["visibleProviders"] == ["holographic", "honcho", "hindsight"]
     assert result["builtinProfileChecks"] == {
         "paths": [
-            "/builtin/profiles",
-            "/builtin?memory_profile=default",
-            "/builtin?memory_profile=work+bot",
-            "/builtin?memory_profile=current",
-            "/builtin?memory_profile=alpha",
-            "/builtin?memory_profile=beta",
+            "/builtin?profile=default",
+            "/builtin?profile=work+bot",
+            "/builtin",
+            "/builtin?profile=alpha",
+            "/builtin?profile=beta",
         ],
         "currentSnapshotReused": True,
         "selectionScopesQueries": True,
@@ -191,10 +190,10 @@ def test_desktop_release_version_and_documentation_are_consistent():
     plugin_api = (ROOT / "dashboard" / "plugin_api.py").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert re.search(r"^version:\s*0\.7\.0\s*$", plugin_yaml, re.MULTILINE)
-    assert manifest["version"] == "0.7.0"
-    assert 'PLUGIN_VERSION = "0.7.0"' in plugin_api
-    assert "const VERSION = '0.7.0'" in source
+    assert re.search(r"^version:\s*0\.7\.1\s*$", plugin_yaml, re.MULTILINE)
+    assert manifest["version"] == "0.7.1"
+    assert 'PLUGIN_VERSION = "0.7.1"' in plugin_api
+    assert "const VERSION = '0.7.1'" in source
     assert "Hermes Desktop" in readme
     assert "$HERMES_HOME/desktop-plugins/hermes-memory-ui/plugin.js" in readme
     assert "Settings" in readme and "Plugins" in readme

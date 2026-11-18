@@ -39,6 +39,7 @@ const sdkValues = {
       connectionId: { get: () => activeConnection },
       profile: { get: () => activeHostProfile }
     },
+    profiles: { list: scope => { profileScopes.push(scope); return { profiles: availableProfiles } } },
     navigate: path => navigations.push(path),
     notify: () => {},
     notifyError: () => {}
@@ -222,21 +223,20 @@ const operationOptions = {
 
 // Exercise the real section and handlers while controlling query completion.
 const builtinPaths = []
+const profileScopes = []
 const builtinApi = createMemoryApi({
   rest: async path => {
     builtinPaths.push(path)
     return { stores: [{ id: path, entries: [path] }] }
   }
 })
-await builtinApi.getBuiltinProfiles()
 await builtinApi.getBuiltin('default')
 await builtinApi.getBuiltin('work bot')
 await builtinApi.getBuiltin()
 assert.deepEqual(builtinPaths, [
-  '/builtin/profiles',
-  '/builtin?memory_profile=default',
-  '/builtin?memory_profile=work+bot',
-  '/builtin?memory_profile=current'
+  '/builtin?profile=default',
+  '/builtin?profile=work+bot',
+  '/builtin'
 ])
 
 const BuiltinMemorySection = module.namespace.BuiltinMemorySection
@@ -251,9 +251,15 @@ let refreshedMemory = 0
 let availableProfiles = [
   { name: 'current', label: 'Active profile' },
   { name: 'default', label: 'default' },
-  { name: 'alpha', label: 'Research bot (alpha)' },
+  { name: 'alpha', bot_title: 'Research bot (alpha)' },
   { name: 'beta', label: 'beta' }
 ]
+await builtinApi.getBuiltinProfiles({ connectionId: activeConnection, hostProfile: activeHostProfile })
+assert.equal(JSON.stringify(profileScopes), JSON.stringify([{ connectionId: 'gateway-a', profile: 'default' }]))
+const profilesSdk = sdkValues.host.profiles
+sdkValues.host.profiles = undefined
+assert.equal(JSON.stringify(await builtinApi.getBuiltinProfiles({ connectionId: activeConnection })), '{"profiles":[]}')
+sdkValues.host.profiles = profilesSdk
 const scoped = value => ({ connectionId: activeConnection, hostProfile: activeHostProfile, value })
 stateHook = () => [selectedProfile, value => { selectedProfile = value }]
 queryHook = options => {
@@ -313,10 +319,10 @@ find(builtinTree, node => node.type === sdkValues.Select).props.onValueChange('b
 memoryData = alphaResponse
 builtinTree = renderBuiltin()
 assert.equal(memoryQuery.queryKey[2], 'beta')
-assert.doesNotMatch(textContent(builtinTree), /memory_profile=alpha/)
+assert.doesNotMatch(textContent(builtinTree), /profile=alpha/)
 memoryData = await memoryQuery.queryFn()
 builtinTree = renderBuiltin()
-assert.match(textContent(builtinTree), /memory_profile=beta/)
+assert.match(textContent(builtinTree), /profile=beta/)
 assert.doesNotMatch(textContent(builtinTree), /active memory/)
 find(builtinTree, node => node.type === sdkValues.Button).props.onClick()
 assert.equal(refreshedMemory, 1)
@@ -325,7 +331,7 @@ assert.equal(refreshedSnapshot, 1)
 memoryError = new Error('profile deleted')
 availableProfiles = [{ name: 'current', label: 'Active profile' }]
 builtinTree = renderBuiltin()
-assert.doesNotMatch(textContent(builtinTree), /memory_profile=beta/)
+assert.doesNotMatch(textContent(builtinTree), /profile=beta/)
 assert.ok(find(builtinTree, node => node.type === sdkValues.ErrorState))
 selector = find(builtinTree, node => node.type === sdkValues.Select)
 assert.equal(selector.props.value, 'beta')
@@ -369,6 +375,7 @@ const scopedRest = path => {
   scopedRestCalls++
   return new Promise(resolve => pendingReads.push({ path, resolve }))
 }
+sdkValues.host.profiles.list = () => scopedRest('/api/profiles')
 const scopedApi = createMemoryApi({ rest: scopedRest })
 ctx.rest = scopedRest
 queryHook = options => {

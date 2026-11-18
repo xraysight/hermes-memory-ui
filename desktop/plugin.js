@@ -25,7 +25,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 
-const VERSION = '0.7.0'
+const VERSION = '0.7.1'
 const PLUGIN_ID = 'hermes-memory-ui'
 const PLUGIN_NAME = 'Hermes Memory UI'
 const PLUGIN_ROUTE = '/memory'
@@ -452,8 +452,8 @@ export function createMemoryApi(ctx) {
         search: normalized.search
       }, 120_000)
     },
-    getBuiltinProfiles: () => get('/builtin/profiles', {}, 30_000),
-    getBuiltin: (profile = 'current') => get('/builtin', { memory_profile: profile }, 30_000),
+    getBuiltinProfiles: scope => host.profiles?.list?.({ connectionId: scope.connectionId, profile: scope.hostProfile }) ?? { profiles: [] },
+    getBuiltin: (profile = 'current') => get('/builtin', profile === 'current' ? {} : { profile }, 30_000),
     searchSessions: options => get('/session-search', options, 60_000),
     queryByteRover: (query, timeout = QUERY_CONTROL_CONFIG.byterover.queryTimeout) => get(
       '/byterover/query',
@@ -918,7 +918,7 @@ export function BuiltinMemorySection({ api, builtin, refreshSnapshot, t }) {
   const [profile, setProfile] = useState('current')
   const profiles = useQuery({
     queryKey: [PLUGIN_ID, 'builtin-profiles', scope.connectionId, scope.hostProfile],
-    queryFn: () => readInMemoryScope(scope, () => api.getBuiltinProfiles()),
+    queryFn: () => readInMemoryScope(scope, () => api.getBuiltinProfiles(scope)),
     enabled: scope.connectionId != null,
     staleTime: 10_000
   })
@@ -935,8 +935,8 @@ export function BuiltinMemorySection({ api, builtin, refreshSnapshot, t }) {
     : !memory.error && memory.data?.profile === profile && matchesMemoryScope(memory.data, scope) ? memory.data.value : null
   const options = [{ value: 'current', label: t('activeProfile') }].concat(
     list(matchesMemoryScope(profiles.data, scope) ? profiles.data.value?.profiles : null)
-      .filter(item => item.name !== 'current')
-      .map(item => ({ value: item.name, label: item.label || item.name }))
+      .filter(item => item.name && item.name !== 'current')
+      .map(item => ({ value: item.name, label: item.bot_title || item.display_name || item.name }))
   )
   if (!options.some(option => option.value === profile)) {
     options.push({ value: profile, label: `${profile} (${t('unavailable')})` })

@@ -92,17 +92,13 @@ async def _main() -> None:
         sys.path.insert(0, str(agent_source))
 
         plugin_api = _load_plugin_api()
-        from hermes_cli.profiles import list_profile_names
         from hermes_cli.web_server_profiles import _config_profile_scope
+        from fastapi import Depends
 
-        # This harness isolates routing/credential scope; the dedicated builtin
-        # auth harness covers real host ticket authentication and plugin consent.
-        async def consent_refused(_name):
-            return False
+        async def host_scope(profile: str | None = None):
+            with _config_profile_scope(profile):
+                yield
 
-        plugin_api._builtin_profile_access = lambda _request: (None, consent_refused, _config_profile_scope)
-
-        assert "test" in list_profile_names(), "reserved legacy fixture must be discoverable by the host"
         cancel_entered = asyncio.Event()
         cancel_finished = asyncio.Event()
 
@@ -120,7 +116,7 @@ async def _main() -> None:
                 cancel_finished.set()
 
         app = FastAPI()
-        app.include_router(plugin_api.router, prefix="/api/plugins/hermes-memory-ui")
+        app.include_router(plugin_api.router, prefix="/api/plugins/hermes-memory-ui", dependencies=[Depends(host_scope)])
 
         async def get(path: str) -> httpx.Response:
             transport = httpx.ASGITransport(app=app)
@@ -142,35 +138,16 @@ async def _main() -> None:
                 "/api/plugins/hermes-memory-ui/builtin?profile=..%2Fescape"
             )).status_code == 400
 
-            choices_response = await client.get(
-                "/api/plugins/hermes-memory-ui/builtin/profiles?profile=other"
-            )
-            choices_response.raise_for_status()
-            choices = choices_response.json()
-            assert choices["switching_supported"] is True
-            assert {item["name"] for item in choices["profiles"]} == {"current", "default", "other"}
-            assert choices["profiles"][0]["hermes_home"] == str(other_home)
-            assert next(item for item in choices["profiles"] if item["name"] == "other")["label"] == "Other bot (other)"
-
-            # The local memory selector is independent of the host's active bot.
-            for host_profile, memory_profile, home, marker, limits in (
-                ("default", "other", other_home, "profile-B", [9000, 3000]),
-                ("other", "default", default_home, "profile-A", [2200, 1375]),
-                ("other", "current", other_home, "profile-B", [9000, 3000]),
+            for profile, home, marker, limits in (
+                ("other", other_home, "profile-B", [9000, 3000]),
+                ("default", default_home, "profile-A", [2200, 1375]),
             ):
-                response = await client.get(
-                    f"/api/plugins/hermes-memory-ui/builtin?profile={host_profile}&memory_profile={memory_profile}"
-                )
+                response = await client.get(f"/api/plugins/hermes-memory-ui/builtin?profile={profile}")
                 response.raise_for_status()
                 data = response.json()
                 assert data["hermes_home"] == str(home)
                 assert [store["entries"] for store in data["stores"]] == [[marker], [f"user-{marker}"]]
                 assert [store["char_limit"] for store in data["stores"]] == limits
-
-            for selection, status in (("missing", 404), ("..%2Fescape", 400), ("test", 400)):
-                assert (await client.get(
-                    f"/api/plugins/hermes-memory-ui/builtin?profile=other&memory_profile={selection}"
-                )).status_code == status
 
             response = await client.get("/api/plugins/hermes-memory-ui/builtin?profile=default")
             response.raise_for_status()

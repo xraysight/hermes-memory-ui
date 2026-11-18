@@ -14,7 +14,6 @@ import asyncio
 import importlib
 import importlib.util
 import json
-import logging
 import os
 import re
 import shutil
@@ -24,13 +23,12 @@ import sys
 import threading
 import time
 import urllib.parse
-from contextlib import asynccontextmanager
 from contextvars import copy_context
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
-    from fastapi import APIRouter, Depends, HTTPException, Query, Request
+    from fastapi import APIRouter, Depends, HTTPException, Query
 except Exception:  # Allows local syntax/import tests outside the dashboard.
     class APIRouter:  # type: ignore
         def __init__(self, *_args, **_kwargs):
@@ -51,40 +49,23 @@ except Exception:  # Allows local syntax/import tests outside the dashboard.
     def Query(default=None, **_kwargs):  # type: ignore
         return default
 
-    class Request:  # type: ignore
-        pass
-
-
-async def _profile_request_scope(profile: Optional[str] = Query(None)):
-    """Bind one plugin request to its explicitly selected Hermes profile.
-
-    Dashboard's generic SDK does not classify ``/api/plugins`` as profile
-    scoped, while Desktop already appends the active profile to ``ctx.rest``.
-    The plugin accepts the same query contract in both hosts and delegates all
-    validation, home resolution, and credential isolation to Hermes' own
-    context-local request scope. Older single-profile Hermes versions remain
-    compatible when no profile (or ``current``) is requested; an explicit
-    profile fails closed when the safe host helper is unavailable.
-    """
+async def _check_routed_profile(profile: Optional[str] = Query(None)):
+    """Reject a named request if an older host did not bind it to that profile."""
     requested = (profile or "").strip()
-    try:
-        from hermes_cli.web_server_profiles import _config_profile_scope
-    except (ImportError, AttributeError) as exc:
-        if requested and requested.lower() != "current":
-            raise HTTPException(
-                status_code=501,
-                detail="This Hermes version cannot safely scope plugin requests to another profile.",
-            ) from exc
-        yield
+    if not requested or requested.lower() == "current":
         return
+    try:
+        from hermes_constants import profile_name_for_home
+    except ImportError as exc:
+        raise HTTPException(status_code=501, detail="Profile routing is unavailable on this Hermes host.") from exc
+    if profile_name_for_home(_hermes_home()) != requested:
+        raise HTTPException(status_code=501, detail="Hermes did not route this request to the selected profile.")
 
-    with _config_profile_scope(requested or None):
-        yield
+
+router = APIRouter(dependencies=[Depends(_check_routed_profile)])
 
 
-router = APIRouter(dependencies=[Depends(_profile_request_scope)])
-
-PLUGIN_VERSION = "0.7.0"
+PLUGIN_VERSION = "0.7.1"
 ENTRY_DELIMITER = "\n§\n"
 DEFAULT_MEMORY_LIMIT = 2200
 DEFAULT_USER_LIMIT = 1375
@@ -374,97 +355,6 @@ def _builtin_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "total_entries": sum(s["entry_count"] for s in stores),
         "generated_at": time.time(),
     }
-
-
-def _builtin_profile_access(request: Optional[Request]):
-    """Host policy hooks only when the original request authority is available.
-
-    The isolated plugin host forwards admission, but strips credentials and the
-    native ticket's profile authority. That boolean cannot authorize another
-    profile. Older hosts without the complete policy boundary also stay local.
-    """
-    if request is None or "hosted_http_authenticated" in request.scope.get("state", {}):
-        return None
-    try:
-        from hermes_cli.web_server import _require_token
-        from hermes_cli.dashboard_auth.native_http import _own_profile
-        from hermes_cli.web_server_dashboard import _plugin_api_request_refused
-        from hermes_cli.web_server_profiles import _config_profile_scope
-    except (ImportError, AttributeError):
-        return None
-    _require_token(request)
-    return _own_profile, _plugin_api_request_refused, _config_profile_scope
-
-
-@asynccontextmanager
-async def _builtin_selected_scope(request: Optional[Request], name: str, access):
-    if access is None:
-        raise HTTPException(status_code=501, detail="This Hermes host cannot authorize cross-profile memory access.")
-    own_profile, consent_refused, profile_scope = access
-    principal = getattr(request.state, "native_http_principal", None)
-    if principal is not None:
-        try:
-            own_profile(name, principal["profile_id"])
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail="profile_scope_mismatch") from exc
-    with profile_scope(name):
-        if await consent_refused("hermes-memory-ui"):
-            raise HTTPException(status_code=404, detail="Plugin not found")
-        yield
-
-
-async def _builtin_profiles_payload(request: Optional[Request] = None) -> Dict[str, Any]:
-    """Discover request-addressable homes from Hermes' live-profile registry.
-
-    The current choice also covers custom HERMES_HOME deployments. Never guess
-    profile paths on older hosts: discovery is useful only when the same host
-    can safely scope the subsequent memory read.
-    """
-    entries = [{
-        "name": "current",
-        "label": "Active profile",
-        "hermes_home": str(_hermes_home()),
-    }]
-    access = _builtin_profile_access(request)
-    if access is None:
-        return {"profiles": entries, "switching_supported": False}
-    try:
-        from hermes_cli.profiles import get_profile_dir, list_profile_names, profile_exists, validate_profile_name
-    except (ImportError, AttributeError):
-        return {"profiles": entries, "switching_supported": False}
-
-    try:
-        from hermes_cli.profiles import read_profile_meta
-    except (ImportError, AttributeError):
-        read_profile_meta = None
-
-    for name in list_profile_names():
-        # Legacy directories can remain in the registry under names the host's
-        # request resolver now rejects. Offer only profiles it can address.
-        try:
-            validate_profile_name(name)
-        except ValueError:
-            continue
-        # A profile may be removed between discovery and this response.
-        if name == "current" or not profile_exists(name):
-            continue
-        try:
-            async with _builtin_selected_scope(request, name, access):
-                home = get_profile_dir(name)
-                meta = read_profile_meta(home) if read_profile_meta else {}
-        except Exception as exc:
-            # Discovery must survive one broken profile's secret sources or
-            # metadata. Explicit reads still surface that target's failure.
-            if not isinstance(exc, HTTPException) or exc.status_code not in (400, 403, 404):
-                logging.getLogger(__name__).warning("Skipping memory profile %s: %s", name, _safe_error(exc))
-            continue
-        title = str(meta.get("bot_title") or meta.get("display_name") or "").strip()
-        entries.append({
-            "name": name,
-            "label": f"{title} ({name})" if title and title != name else name,
-            "hermes_home": str(home),
-        })
-    return {"profiles": entries, "switching_supported": True}
 
 
 def _canonical_session_source(source: str) -> str:
@@ -2696,19 +2586,10 @@ async def status() -> Dict[str, Any]:
 
 
 @router.get("/builtin")
-async def builtin(memory_profile: Optional[str] = None, request: Request = None) -> Dict[str, Any]:
-    # This selector is independent of the host's ?profile= scope. In particular,
-    # Desktop's ctx.rest continues to scope all other providers to its active bot.
-    requested = (memory_profile or "").strip()
-    if not requested or requested.lower() == "current":
-        return _builtin_payload()
-    async with _builtin_selected_scope(request, requested, _builtin_profile_access(request)):
-        return _builtin_payload()
-
-
-@router.get("/builtin/profiles")
-async def builtin_profiles(request: Request = None) -> Dict[str, Any]:
-    return await _builtin_profiles_payload(request)
+async def builtin(memory_profile: Optional[str] = None) -> Dict[str, Any]:
+    if (memory_profile or "").strip().lower() not in {"", "current"}:
+        raise HTTPException(status_code=400, detail="Use Hermes' profile parameter; memory_profile is no longer supported.")
+    return _builtin_payload()
 
 
 @router.get("/session-search")

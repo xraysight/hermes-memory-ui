@@ -206,7 +206,7 @@ Built-in memory section:
 - entry count and char usage bar
 - parsed entries
 
-The built-in memory selector changes only the two file cards. Provider and session views continue to follow the host's active profile. Each card shows the selected profile's file path and character limit. Switching profiles or Desktop connections hides the previous files while the new files load. Use the built-in refresh button to reload files and discover newly created profiles. Cross-profile choices require both host access authorization and the target profile's plugin consent. Hosts that cannot verify that authority, including isolated plugin hosts that receive only an admission boolean, offer the active profile only.
+The built-in selector changes only the two file cards. Provider and session views follow the active host profile. Dashboard and Desktop list profiles using the host's own profile list. Appearance in that list does not grant access: reads of a named profile require host support for profile-scoped plugin REST on the current backend and consent from the target profile. The selector does not switch Desktop connections. Each card shows the returned file path and character limit; a failed or stale response does not replace the selected profile's files. Use Refresh to reload both the list and the files.
 
 Session search section:
 

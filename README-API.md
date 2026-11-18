@@ -18,13 +18,9 @@ Dashboard calls these routes through its authenticated API client. Desktop uses 
 
 ## Profile scope
 
-All endpoints accept the optional `profile` query parameter used by the Dashboard selector and Desktop's scoped REST client. A named profile scopes the request's Hermes home, configuration, secrets, local stores, provider calls, worker-thread context, and provider subprocess environment. The backend uses Hermes' context-local request scope and never changes the process environment per request, so concurrent profile requests remain isolated.
-
-`profile=current`, an empty value, or an omitted parameter means the serving process's current profile. `profile=default` explicitly selects the default profile; other values select the corresponding named profile. Invalid names return 400 and missing profiles return 404 through Hermes' resolver.
+On hosts that support profile-scoped plugin REST, Hermes consumes the optional `profile` query parameter and applies its authentication, plugin enablement and profile routing before the handler reads any data. The plugin does not switch the profile itself. Its provider and session views use the active host selection; a named request whose profile does not match the home provided by Hermes fails rather than reading the launch profile's data.
 
 Profile routing does not override provider-side sharing. Profiles configured with the same remote account and scope identifiers (for example a Mem0 user, Honcho workspace/peers, or Hindsight bank) share that provider data by design.
-
-For compatibility, a host without Hermes' safe context-local profile helper continues to serve omitted/empty/`current` requests as a single-profile backend. It returns 501 for any explicit profile selection, including `default`, rather than falling back to the launch profile's credentials. The plugin does not claim a speculative minimum Hermes version; capability detection is performed at request time.
 
 ## Available endpoints
 
@@ -49,11 +45,7 @@ Entries are split on Hermes' built-in delimiter §.
 
 The response includes entry count, char count, configured/default char limits, usage percentage, file path, and modified timestamp.
 
-Optional `memory_profile` selects a profile for these two files independently of the host's `profile` parameter. Omitted, empty, or `current` uses the request's active profile. Explicit names require the original request's host authorization and the target profile's plugin consent before reading files or limits in that profile's context-local scope. Native profile grants cannot read another profile (403); disabled or unavailable target plugins return 404. For unrestricted host sessions, invalid names return 400 and missing profiles return 404. Hosts unable to verify cross-profile authority return 501 for explicit names, including isolated plugin hosts whose IPC admission does not carry the principal's profile authority.
-
-### GET `/builtin/profiles`
-
-Returns `{ "profiles": [{ "name": "current", "label": "Active profile", "hermes_home": "..." }], "switching_supported": false }` when host authorization is unavailable. Hosts with native discovery and the complete authorization boundary also return live profiles the request may access and that permit this plugin, with their labels and home paths, and set `switching_supported` to true. Inaccessible, disabled, missing, and reserved names are omitted before reading their display metadata. The `current` entry always represents the request's active home, including a custom `HERMES_HOME`. This endpoint does not read memory files or contact memory providers.
+To inspect another profile on the same backend, use `/builtin?profile=<name>`. Hermes authorizes that request for the target profile and checks that the target permits this plugin. A host profile listing is discovery only, not evidence of consent. The legacy `memory_profile` parameter rejects a named selection with HTTP 400 instead of silently showing the active profile.
 
 ### GET `/session-search`
 
