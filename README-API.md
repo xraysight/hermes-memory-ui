@@ -49,6 +49,12 @@ Entries are split on Hermes' built-in delimiter §.
 
 The response includes entry count, char count, configured/default char limits, usage percentage, file path, and modified timestamp.
 
+Optional `memory_profile` selects a profile for these two files independently of the host's `profile` parameter. Omitted, empty, or `current` uses the request's active profile. Explicit names require the original request's host authorization and the target profile's plugin consent before reading files or limits in that profile's context-local scope. Native profile grants cannot read another profile (403); disabled or unavailable target plugins return 404. For unrestricted host sessions, invalid names return 400 and missing profiles return 404. Hosts unable to verify cross-profile authority return 501 for explicit names, including isolated plugin hosts whose IPC admission does not carry the principal's profile authority.
+
+### GET `/builtin/profiles`
+
+Returns `{ "profiles": [{ "name": "current", "label": "Active profile", "hermes_home": "..." }], "switching_supported": false }` when host authorization is unavailable. Hosts with native discovery and the complete authorization boundary also return live profiles the request may access and that permit this plugin, with their labels and home paths, and set `switching_supported` to true. Inaccessible, disabled, missing, and reserved names are omitted before reading their display metadata. The `current` entry always represents the request's active home, including a custom `HERMES_HOME`. This endpoint does not read memory files or contact memory providers.
+
 ### GET `/session-search`
 
 Runs an explicit read-only search over previous Hermes sessions through Hermes' built-in `session_search` tool. This endpoint is not called from `/snapshot` or page load; the UI calls it only after the user submits a query.

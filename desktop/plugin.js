@@ -19,7 +19,8 @@ import {
   host,
   useMutation,
   usePluginI18n,
-  useQuery
+  useQuery,
+  useValue
 } from '@hermes/plugin-sdk'
 import { useEffect, useMemo, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
@@ -95,7 +96,10 @@ const bundles = {
     failed: 'Unable to load memory',
     empty: 'Nothing to show',
     builtin: 'Built-in memory',
-    builtinHint: 'The active profile files Hermes reads directly.',
+    builtinHint: 'Choose a profile to read its MEMORY.md and USER.md. Other sections follow the active profile.',
+    memoryProfile: 'Memory profile / bot',
+    activeProfile: 'Active profile',
+    refreshMemory: 'Refresh memory',
     providers: 'Configured providers',
     providerHint: 'Read-only provider state and visible memory collections.',
     sessions: 'Session search',
@@ -192,7 +196,10 @@ const bundles = {
     failed: '无法加载记忆',
     empty: '没有可显示的内容',
     builtin: '内置记忆',
-    builtinHint: 'Hermes 直接读取的当前配置下的记忆文件。',
+    builtinHint: '选择配置以查看其 MEMORY.md 和 USER.md。其他区域仍使用当前配置。',
+    memoryProfile: '记忆配置 / 机器人',
+    activeProfile: '当前配置',
+    refreshMemory: '刷新记忆',
     providers: '已配置的记忆提供方',
     providerHint: '只读查看记忆提供方的状态和可见的记忆集合。',
     sessions: '会话搜索',
@@ -289,7 +296,10 @@ const bundles = {
     failed: 'Nie można wczytać pamięci',
     empty: 'Brak danych do pokazania',
     builtin: 'Wbudowana pamięć',
-    builtinHint: 'Pliki aktywnego profilu odczytywane bezpośrednio przez Hermes.',
+    builtinHint: 'Wybierz profil, aby odczytać jego MEMORY.md i USER.md. Pozostałe sekcje używają aktywnego profilu.',
+    memoryProfile: 'Profil pamięci / bot',
+    activeProfile: 'Aktywny profil',
+    refreshMemory: 'Odśwież pamięć',
     providers: 'Skonfigurowane źródła',
     providerHint: 'Stan źródeł i widoczne kolekcje pamięci — tylko do odczytu.',
     sessions: 'Wyszukiwanie sesji',
@@ -442,6 +452,8 @@ export function createMemoryApi(ctx) {
         search: normalized.search
       }, 120_000)
     },
+    getBuiltinProfiles: () => get('/builtin/profiles', {}, 30_000),
+    getBuiltin: (profile = 'current') => get('/builtin', { memory_profile: profile }, 30_000),
     searchSessions: options => get('/session-search', options, 60_000),
     queryByteRover: (query, timeout = QUERY_CONTROL_CONFIG.byterover.queryTimeout) => get(
       '/byterover/query',
@@ -879,6 +891,98 @@ function StoreCard({ store, fallbackName, t }) {
   })
 }
 
+function useMemoryScope() {
+  return {
+    connectionId: useValue(host.state.connectionId),
+    hostProfile: useValue(host.state.profile)
+  }
+}
+
+function matchesMemoryScope(data, scope) {
+  // null is an unresolved host route, not a shared connection identity.
+  return scope.connectionId != null && data?.connectionId === scope.connectionId && data?.hostProfile === scope.hostProfile
+}
+
+async function readInMemoryScope(scope, read) {
+  const currentScope = () => ({ connectionId: host.state.connectionId.get(), hostProfile: host.state.profile.get() })
+  // ctx.rest follows the live host route. A retry from an old query must not
+  // fetch the new gateway into the previous gateway's cache.
+  if (!matchesMemoryScope(currentScope(), scope)) throw new Error('Memory connection or active profile changed')
+  const value = await read()
+  if (!matchesMemoryScope(currentScope(), scope)) throw new Error('Memory connection or active profile changed')
+  return { ...scope, value }
+}
+
+export function BuiltinMemorySection({ api, builtin, refreshSnapshot, t }) {
+  const scope = useMemoryScope()
+  const [profile, setProfile] = useState('current')
+  const profiles = useQuery({
+    queryKey: [PLUGIN_ID, 'builtin-profiles', scope.connectionId, scope.hostProfile],
+    queryFn: () => readInMemoryScope(scope, () => api.getBuiltinProfiles()),
+    enabled: scope.connectionId != null,
+    staleTime: 10_000
+  })
+  const memory = useQuery({
+    queryKey: [PLUGIN_ID, 'builtin', profile, scope.connectionId, scope.hostProfile],
+    queryFn: async () => ({ profile, ...await readInMemoryScope(scope, () => api.getBuiltin(profile)) }),
+    enabled: scope.connectionId != null && profile !== 'current',
+    staleTime: 10_000
+  })
+  // Tag responses so a host query client that retains previous data cannot
+  // paint another bot's memory under the newly selected profile.
+  const selected = scope.connectionId == null ? null : profile === 'current'
+    ? builtin
+    : !memory.error && memory.data?.profile === profile && matchesMemoryScope(memory.data, scope) ? memory.data.value : null
+  const options = [{ value: 'current', label: t('activeProfile') }].concat(
+    list(matchesMemoryScope(profiles.data, scope) ? profiles.data.value?.profiles : null)
+      .filter(item => item.name !== 'current')
+      .map(item => ({ value: item.name, label: item.label || item.name }))
+  )
+  if (!options.some(option => option.value === profile)) {
+    options.push({ value: profile, label: `${profile} (${t('unavailable')})` })
+  }
+  const refresh = () => {
+    profiles.refetch()
+    if (profile === 'current') refreshSnapshot()
+    else memory.refetch()
+  }
+  return jsxs('section', {
+    className: 'space-y-3',
+    children: [
+      jsx(SectionHeading, {
+        title: t('builtin'),
+        description: t('builtinHint'),
+        aside: selected ? jsx(Badge, { variant: 'outline', children: t('entryCount', finite(selected.total_entries)) }) : null
+      }),
+      jsxs('div', {
+        className: 'flex flex-wrap items-end gap-3',
+        children: [
+          jsx(Field, {
+            label: t('memoryProfile'),
+            children: jsx(NativeSelect, {
+              value: profile,
+              onValueChange: setProfile,
+              placeholder: t('activeProfile'),
+              options
+            })
+          }),
+          jsx(Button, {
+            variant: 'outline',
+            onClick: refresh,
+            disabled: profile !== 'current' && memory.isLoading,
+            children: t('refreshMemory')
+          })
+        ]
+      }),
+      jsx(ErrorNotice, { error: profiles.error, title: t('failed'), t }),
+      profile !== 'current' ? jsx(ErrorNotice, { error: memory.error, title: t('failed'), t }) : null,
+      selected
+        ? jsx(BuiltinStores, { builtin: selected, t })
+        : profile !== 'current' && !memory.error ? jsx(LoadingLine, { label: t('loading') }) : null
+    ]
+  })
+}
+
 function BuiltinStores({ builtin, t }) {
   const stores = Array.isArray(builtin?.stores)
     ? builtin.stores
@@ -888,11 +992,6 @@ function BuiltinStores({ builtin, t }) {
   return jsxs('section', {
     className: 'space-y-3',
     children: [
-      jsx(SectionHeading, {
-        title: t('builtin'),
-        description: t('builtinHint'),
-        aside: jsx(Badge, { variant: 'outline', children: t('entryCount', finite(builtin?.total_entries, stores.reduce((sum, store) => sum + finite(store?.entry_count), 0))) })
-      }),
       stores.length
         ? jsx('div', {
           className: 'grid gap-3',
@@ -1772,15 +1871,18 @@ function SessionSearch({ api, t }) {
 
 function MemoryPage({ ctx }) {
   const t = usePluginI18n(PLUGIN_ID)
+  const scope = useMemoryScope()
   const api = useMemo(() => createMemoryApi(ctx), [ctx])
   const initialFilters = normalizeSnapshotFilters()
   const [filters, setFilters] = useState(initialFilters)
   const [appliedFilters, setAppliedFilters] = useState(initialFilters)
-  const snapshot = useQuery({
-    queryKey: [PLUGIN_ID, 'snapshot', appliedFilters.limit, appliedFilters.minTrust, appliedFilters.category, appliedFilters.search],
-    queryFn: () => api.getSnapshot(appliedFilters),
+  const snapshotQuery = useQuery({
+    queryKey: [PLUGIN_ID, 'snapshot', scope.connectionId, scope.hostProfile, appliedFilters.limit, appliedFilters.minTrust, appliedFilters.category, appliedFilters.search],
+    queryFn: () => readInMemoryScope(scope, () => api.getSnapshot(appliedFilters)),
+    enabled: scope.connectionId != null,
     staleTime: 10_000
   })
+  const snapshot = { ...snapshotQuery, data: matchesMemoryScope(snapshotQuery.data, scope) ? snapshotQuery.data.value : null }
   const updateFilter = (key, value) => setFilters(current => ({ ...current, [key]: value }))
   const providers = visibleProviderKeys(snapshot.data)
   const refresh = () => {
@@ -1828,7 +1930,7 @@ function MemoryPage({ ctx }) {
           }),
           snapshot.isLoading ? jsx(PageSkeleton, {}) : null,
           jsx(ErrorNotice, { error: snapshot.error, title: t('failed'), t }),
-          snapshot.data ? jsx(BuiltinStores, { builtin: snapshot.data.builtin, t }) : null,
+          snapshot.data ? jsx(BuiltinMemorySection, { api, builtin: snapshot.data.builtin, refreshSnapshot: snapshot.refetch, t }) : null,
           snapshot.data ? jsx(Separator, {}) : null,
           snapshot.data ? jsxs('section', {
             className: 'space-y-4',

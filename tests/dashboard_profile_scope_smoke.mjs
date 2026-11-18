@@ -221,6 +221,7 @@ const exercisedPaths = new Set(
 assert.deepEqual(
   [...exercisedPaths].sort(),
   [
+    '/api/plugins/hermes-memory-ui/builtin/profiles',
     '/api/plugins/hermes-memory-ui/byterover/query',
     '/api/plugins/hermes-memory-ui/hindsight/contents',
     '/api/plugins/hermes-memory-ui/hindsight/recall',

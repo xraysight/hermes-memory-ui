@@ -199,11 +199,14 @@ Top summary:
 
 Built-in memory section:
 
+- Profile / bot selector for the active profile and other profiles authorized by the host in both Dashboard and Desktop
 - Agent memory card (`MEMORY.md`)
 - User profile card (`USER.md`)
 - path, file existence, modification time
 - entry count and char usage bar
 - parsed entries
+
+The built-in memory selector changes only the two file cards. Provider and session views continue to follow the host's active profile. Each card shows the selected profile's file path and character limit. Switching profiles or Desktop connections hides the previous files while the new files load. Use the built-in refresh button to reload files and discover newly created profiles. Cross-profile choices require both host access authorization and the target profile's plugin consent. Hosts that cannot verify that authority, including isolated plugin hosts that receive only an admission boolean, offer the active profile only.
 
 Session search section:
 

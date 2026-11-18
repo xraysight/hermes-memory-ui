@@ -102,6 +102,29 @@ def test_desktop_plugin_registers_native_surfaces_and_scoped_api_calls():
         "mnemosynePrefetch": {"query": "release plan"},
     }
     assert result["visibleProviders"] == ["holographic", "honcho", "hindsight"]
+    assert result["builtinProfileChecks"] == {
+        "paths": [
+            "/builtin/profiles",
+            "/builtin?memory_profile=default",
+            "/builtin?memory_profile=work+bot",
+            "/builtin?memory_profile=current",
+            "/builtin?memory_profile=alpha",
+            "/builtin?memory_profile=beta",
+        ],
+        "currentSnapshotReused": True,
+        "selectionScopesQueries": True,
+        "staleMemoryHidden": True,
+        "failedMemoryHidden": True,
+        "removedSelectionRetained": True,
+        "legacyCurrentOnly": True,
+    }
+    assert result["connectionScopeChecks"] == {
+        "sameNameAcrossConnections": True,
+        "activeHostProfileChanges": True,
+        "currentSnapshotIsolated": True,
+        "obsoleteRequestsRejected": True,
+        "unresolvedConnectionsBlocked": True,
+    }
 
     paths = result["restPaths"]
     assert len(paths) == 10
