@@ -19,7 +19,8 @@ import {
   host,
   useMutation,
   usePluginI18n,
-  useQuery
+  useQuery,
+  useValue
 } from '@hermes/plugin-sdk'
 import { useEffect, useMemo, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
@@ -890,26 +891,50 @@ function StoreCard({ store, fallbackName, t }) {
   })
 }
 
+function useMemoryScope() {
+  return {
+    connectionId: useValue(host.state.connectionId),
+    hostProfile: useValue(host.state.profile)
+  }
+}
+
+function matchesMemoryScope(data, scope) {
+  // null is an unresolved host route, not a shared connection identity.
+  return scope.connectionId != null && data?.connectionId === scope.connectionId && data?.hostProfile === scope.hostProfile
+}
+
+async function readInMemoryScope(scope, read) {
+  const currentScope = () => ({ connectionId: host.state.connectionId.get(), hostProfile: host.state.profile.get() })
+  // ctx.rest follows the live host route. A retry from an old query must not
+  // fetch the new gateway into the previous gateway's cache.
+  if (!matchesMemoryScope(currentScope(), scope)) throw new Error('Memory connection or active profile changed')
+  const value = await read()
+  if (!matchesMemoryScope(currentScope(), scope)) throw new Error('Memory connection or active profile changed')
+  return { ...scope, value }
+}
+
 export function BuiltinMemorySection({ api, builtin, refreshSnapshot, t }) {
+  const scope = useMemoryScope()
   const [profile, setProfile] = useState('current')
   const profiles = useQuery({
-    queryKey: [PLUGIN_ID, 'builtin-profiles'],
-    queryFn: () => api.getBuiltinProfiles(),
+    queryKey: [PLUGIN_ID, 'builtin-profiles', scope.connectionId, scope.hostProfile],
+    queryFn: () => readInMemoryScope(scope, () => api.getBuiltinProfiles()),
+    enabled: scope.connectionId != null,
     staleTime: 10_000
   })
   const memory = useQuery({
-    queryKey: [PLUGIN_ID, 'builtin', profile],
-    queryFn: async () => ({ profile, builtin: await api.getBuiltin(profile) }),
-    enabled: profile !== 'current',
+    queryKey: [PLUGIN_ID, 'builtin', profile, scope.connectionId, scope.hostProfile],
+    queryFn: async () => ({ profile, ...await readInMemoryScope(scope, () => api.getBuiltin(profile)) }),
+    enabled: scope.connectionId != null && profile !== 'current',
     staleTime: 10_000
   })
   // Tag responses so a host query client that retains previous data cannot
   // paint another bot's memory under the newly selected profile.
-  const selected = profile === 'current'
+  const selected = scope.connectionId == null ? null : profile === 'current'
     ? builtin
-    : !memory.error && memory.data?.profile === profile ? memory.data.builtin : null
+    : !memory.error && memory.data?.profile === profile && matchesMemoryScope(memory.data, scope) ? memory.data.value : null
   const options = [{ value: 'current', label: t('activeProfile') }].concat(
-    list(profiles.data?.profiles)
+    list(matchesMemoryScope(profiles.data, scope) ? profiles.data.value?.profiles : null)
       .filter(item => item.name !== 'current')
       .map(item => ({ value: item.name, label: item.label || item.name }))
   )
@@ -1846,15 +1871,18 @@ function SessionSearch({ api, t }) {
 
 function MemoryPage({ ctx }) {
   const t = usePluginI18n(PLUGIN_ID)
+  const scope = useMemoryScope()
   const api = useMemo(() => createMemoryApi(ctx), [ctx])
   const initialFilters = normalizeSnapshotFilters()
   const [filters, setFilters] = useState(initialFilters)
   const [appliedFilters, setAppliedFilters] = useState(initialFilters)
-  const snapshot = useQuery({
-    queryKey: [PLUGIN_ID, 'snapshot', appliedFilters.limit, appliedFilters.minTrust, appliedFilters.category, appliedFilters.search],
-    queryFn: () => api.getSnapshot(appliedFilters),
+  const snapshotQuery = useQuery({
+    queryKey: [PLUGIN_ID, 'snapshot', scope.connectionId, scope.hostProfile, appliedFilters.limit, appliedFilters.minTrust, appliedFilters.category, appliedFilters.search],
+    queryFn: () => readInMemoryScope(scope, () => api.getSnapshot(appliedFilters)),
+    enabled: scope.connectionId != null,
     staleTime: 10_000
   })
+  const snapshot = { ...snapshotQuery, data: matchesMemoryScope(snapshotQuery.data, scope) ? snapshotQuery.data.value : null }
   const updateFilter = (key, value) => setFilters(current => ({ ...current, [key]: value }))
   const providers = visibleProviderKeys(snapshot.data)
   const refresh = () => {

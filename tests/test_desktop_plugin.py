@@ -118,6 +118,13 @@ def test_desktop_plugin_registers_native_surfaces_and_scoped_api_calls():
         "removedSelectionRetained": True,
         "legacyCurrentOnly": True,
     }
+    assert result["connectionScopeChecks"] == {
+        "sameNameAcrossConnections": True,
+        "activeHostProfileChanges": True,
+        "currentSnapshotIsolated": True,
+        "obsoleteRequestsRejected": True,
+        "unresolvedConnectionsBlocked": True,
+    }
 
     paths = result["restPaths"]
     assert len(paths) == 10

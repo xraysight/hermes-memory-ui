@@ -42,6 +42,16 @@ def install_module(monkeypatch, name, module):
     monkeypatch.setitem(sys.modules, name, module)
 
 
+def authorize_builtin_fixture(monkeypatch, module, scope):
+    # These unit tests exercise discovery and context cleanup. Host authentication
+    # and consent are exercised separately through the HTTP integration harness.
+    async def consent_refused(_name):
+        return False
+
+    monkeypatch.setattr(module, "_builtin_profile_access", lambda _request: (None, consent_refused, scope))
+    return types.SimpleNamespace(state=types.SimpleNamespace(native_http_principal=None))
+
+
 async def enter_and_close(scope):
     await scope.__anext__()
     await scope.aclose()
@@ -108,7 +118,8 @@ def test_builtin_profiles_use_native_registry_and_keep_custom_current(monkeypatc
     profiles.read_profile_meta = lambda home: {"bot_title": "Work bot"} if home.name == "work" else {}
     install_module(monkeypatch, "hermes_cli.profiles", profiles)
 
-    payload = asyncio.run(module.builtin_profiles())
+    request = authorize_builtin_fixture(monkeypatch, module, contextlib.nullcontext)
+    payload = asyncio.run(module.builtin_profiles(request))
     assert payload["switching_supported"] is True
     assert payload["profiles"] == [
         {"name": "current", "label": "Active profile", "hermes_home": str(tmp_path / "custom-home")},
@@ -138,9 +149,10 @@ def test_builtin_memory_profile_restores_outer_host_scope(monkeypatch, tmp_path)
 
     host_profiles._config_profile_scope = scope
     install_module(monkeypatch, "hermes_cli.web_server_profiles", host_profiles)
+    request = authorize_builtin_fixture(monkeypatch, module, scope)
 
     async def select_and_restore():
-        payload = await module.builtin("other")
+        payload = await module.builtin("other", request)
         # Check inside the request task: asyncio.run restores its caller's
         # context even when the implementation fails to reset the override.
         assert active.get() == tmp_path
@@ -151,6 +163,31 @@ def test_builtin_memory_profile_restores_outer_host_scope(monkeypatch, tmp_path)
     payload = asyncio.run(select_and_restore())
     assert payload["hermes_home"] == str(other_home)
     assert [store["entries"] for store in payload["stores"]] == [["Other bot memory"], ["Other bot user"]]
+
+
+def test_builtin_discovery_skips_broken_profile_but_explicit_read_fails(monkeypatch, tmp_path, caplog):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    profiles = types.ModuleType("hermes_cli.profiles")
+    profiles.list_profile_names = lambda: ["broken", "healthy"]
+    profiles.validate_profile_name = lambda _name: None
+    profiles.profile_exists = lambda _name: True
+    profiles.get_profile_dir = lambda name: tmp_path / name
+    profiles.read_profile_meta = lambda _home: {}
+    install_module(monkeypatch, "hermes_cli.profiles", profiles)
+
+    @contextlib.contextmanager
+    def scope(name):
+        if name == "broken":
+            raise RuntimeError("secret source failed: token=private-fixture")
+        yield
+
+    request = authorize_builtin_fixture(monkeypatch, module, scope)
+    payload = asyncio.run(module.builtin_profiles(request))
+    assert [entry["name"] for entry in payload["profiles"]] == ["current", "healthy"]
+    assert "Skipping memory profile broken" in caplog.text
+    assert "private-fixture" not in caplog.text
+    with pytest.raises(RuntimeError, match="secret source failed"):
+        asyncio.run(module.builtin("broken", request))
 
 
 def test_profile_dependency_unwinds_context_on_cancellation(monkeypatch, tmp_path):

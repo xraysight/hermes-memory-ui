@@ -93,6 +93,14 @@ async def _main() -> None:
 
         plugin_api = _load_plugin_api()
         from hermes_cli.profiles import list_profile_names
+        from hermes_cli.web_server_profiles import _config_profile_scope
+
+        # This harness isolates routing/credential scope; the dedicated builtin
+        # auth harness covers real host ticket authentication and plugin consent.
+        async def consent_refused(_name):
+            return False
+
+        plugin_api._builtin_profile_access = lambda _request: (None, consent_refused, _config_profile_scope)
 
         assert "test" in list_profile_names(), "reserved legacy fixture must be discoverable by the host"
         cancel_entered = asyncio.Event()
