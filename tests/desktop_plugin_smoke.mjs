@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import process from 'node:process'
 import vm from 'node:vm'
@@ -7,6 +8,8 @@ if (!pluginPath) throw new Error('desktop plugin path is required')
 
 const source = await fs.readFile(pluginPath, 'utf8')
 const navigations = []
+let queryHook = () => ({ data: null, isLoading: false, error: null, refetch: () => {} })
+let stateHook = initial => [initial, () => {}]
 const sdkValues = {
   Badge: function Badge() {},
   Button: function Button() {},
@@ -37,7 +40,7 @@ const sdkValues = {
   icons: {},
   useMutation: () => ({ mutate: () => {}, isPending: false, error: null }),
   usePluginI18n: () => (key => key),
-  useQuery: () => ({ data: null, isLoading: false, error: null, refetch: () => {} }),
+  useQuery: options => queryHook(options),
   useQueryClient: () => ({ invalidateQueries: () => {} })
 }
 
@@ -45,7 +48,7 @@ const reactValues = {
   Fragment: Symbol.for('react.fragment'),
   useEffect: () => {},
   useMemo: fn => fn(),
-  useState: initial => [initial, () => {}]
+  useState: initial => stateHook(initial)
 }
 
 const runtimeValues = {
@@ -210,7 +213,146 @@ const operationOptions = {
   })
 }
 
+// Exercise the real section and handlers while controlling query completion.
+const builtinPaths = []
+const builtinApi = createMemoryApi({
+  rest: async path => {
+    builtinPaths.push(path)
+    return { stores: [{ id: path, entries: [path] }] }
+  }
+})
+await builtinApi.getBuiltinProfiles()
+await builtinApi.getBuiltin('default')
+await builtinApi.getBuiltin('work bot')
+await builtinApi.getBuiltin()
+assert.deepEqual(builtinPaths, [
+  '/builtin/profiles',
+  '/builtin?memory_profile=default',
+  '/builtin?memory_profile=work+bot',
+  '/builtin?memory_profile=current'
+])
+
+const BuiltinMemorySection = module.namespace.BuiltinMemorySection
+assert.equal(typeof BuiltinMemorySection, 'function')
+let selectedProfile = 'current'
+let memoryData = null
+let memoryError = null
+let memoryQuery
+let refreshedSnapshot = 0
+let refreshedProfiles = 0
+let refreshedMemory = 0
+let availableProfiles = [
+  { name: 'current', label: 'Active profile' },
+  { name: 'default', label: 'default' },
+  { name: 'alpha', label: 'Research bot (alpha)' },
+  { name: 'beta', label: 'beta' }
+]
+stateHook = () => [selectedProfile, value => { selectedProfile = value }]
+queryHook = options => {
+  if (options.queryKey[1] === 'builtin-profiles') {
+    return { data: { profiles: availableProfiles }, refetch: () => { refreshedProfiles++ } }
+  }
+  memoryQuery = options
+  return {
+    data: memoryData,
+    error: memoryError,
+    isLoading: !memoryData && !memoryError,
+    refetch: () => { refreshedMemory++ }
+  }
+}
+const sdkComponents = new Set(Object.values(sdkValues))
+function expand(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return node
+  if (Array.isArray(node)) return node.map(expand)
+  if (typeof node.type === 'function' && !sdkComponents.has(node.type)) return expand(node.type(node.props))
+  return { ...node, props: { ...node.props, children: expand(node.props?.children) } }
+}
+function find(node, predicate) {
+  if (!node || typeof node !== 'object') return null
+  if (Array.isArray(node)) return node.map(item => find(item, predicate)).find(Boolean)
+  return predicate(node) ? node : find(node.props?.children, predicate)
+}
+function textContent(node) {
+  if (node === null || node === undefined || node === false) return ''
+  if (Array.isArray(node)) return node.map(textContent).join(' ')
+  if (typeof node !== 'object') return String(node)
+  return textContent(node.props?.children)
+}
+const currentBuiltin = { stores: [{ filename: 'MEMORY.md', entries: ['active memory'], path: '/active/memories/MEMORY.md' }] }
+const renderBuiltin = () => expand(BuiltinMemorySection({
+  api: builtinApi,
+  builtin: currentBuiltin,
+  refreshSnapshot: () => { refreshedSnapshot++ },
+  t: key => key
+}))
+let builtinTree = renderBuiltin()
+assert.equal(memoryQuery.enabled, false)
+assert.match(textContent(builtinTree), /active memory/)
+let selector = find(builtinTree, node => node.type === sdkValues.Select)
+assert.ok(selector)
+assert.match(textContent(selector), /Research bot \(alpha\)/)
+find(builtinTree, node => node.type === sdkValues.Button).props.onClick()
+assert.equal(refreshedSnapshot, 1)
+assert.equal(refreshedProfiles, 1)
+
+selector.props.onValueChange('alpha')
+builtinTree = renderBuiltin()
+assert.equal(memoryQuery.queryKey[2], 'alpha')
+assert.equal(memoryQuery.enabled, true)
+assert.doesNotMatch(textContent(builtinTree), /active memory/)
+const alphaResponse = await memoryQuery.queryFn()
+find(builtinTree, node => node.type === sdkValues.Select).props.onValueChange('beta')
+memoryData = alphaResponse
+builtinTree = renderBuiltin()
+assert.equal(memoryQuery.queryKey[2], 'beta')
+assert.doesNotMatch(textContent(builtinTree), /memory_profile=alpha/)
+memoryData = await memoryQuery.queryFn()
+builtinTree = renderBuiltin()
+assert.match(textContent(builtinTree), /memory_profile=beta/)
+assert.doesNotMatch(textContent(builtinTree), /active memory/)
+find(builtinTree, node => node.type === sdkValues.Button).props.onClick()
+assert.equal(refreshedMemory, 1)
+assert.equal(refreshedSnapshot, 1)
+
+memoryError = new Error('profile deleted')
+availableProfiles = [{ name: 'current', label: 'Active profile' }]
+builtinTree = renderBuiltin()
+assert.doesNotMatch(textContent(builtinTree), /memory_profile=beta/)
+assert.ok(find(builtinTree, node => node.type === sdkValues.ErrorState))
+selector = find(builtinTree, node => node.type === sdkValues.Select)
+assert.equal(selector.props.value, 'beta')
+assert.match(textContent(selector), /beta \(unavailable\)/)
+assert.ok(find(selector, node => node.type === sdkValues.SelectItem && node.props.value === 'current'))
+assert.ok(find(selector, node => node.type === sdkValues.SelectItem && node.props.value === 'beta'))
+find(builtinTree, node => node.type === sdkValues.Select).props.onValueChange('current')
+builtinTree = renderBuiltin()
+assert.match(textContent(builtinTree), /active memory/)
+assert.equal(memoryQuery.enabled, false)
+
+availableProfiles = [{ name: 'current', label: 'Active profile' }]
+builtinTree = renderBuiltin()
+selector = find(builtinTree, node => node.type === sdkValues.Select)
+const profileItems = []
+function collectItems(node) {
+  if (!node || typeof node !== 'object') return
+  if (Array.isArray(node)) return node.forEach(collectItems)
+  if (node.type === sdkValues.SelectItem) profileItems.push(node.props.value)
+  collectItems(node.props?.children)
+}
+collectItems(selector)
+assert.deepEqual(profileItems, ['current'])
+const builtinProfileChecks = {
+  paths: builtinPaths,
+  currentSnapshotReused: true,
+  selectionScopesQueries: true,
+  staleMemoryHidden: true,
+  failedMemoryHidden: true,
+  removedSelectionRetained: true,
+  legacyCurrentOnly: true
+}
+
 process.stdout.write(JSON.stringify({
+  builtinProfileChecks,
   defaultFilters,
   i18nLocales: Object.keys(localeBundles ?? {}).sort(),
   normalizedFilters,

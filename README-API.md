@@ -49,6 +49,12 @@ Entries are split on Hermes' built-in delimiter §.
 
 The response includes entry count, char count, configured/default char limits, usage percentage, file path, and modified timestamp.
 
+Optional `memory_profile` selects a profile for these two files independently of the host's `profile` parameter. Omitted, empty, or `current` uses the request's active profile; `default` or a named profile uses Hermes' validated context-local scope, including that profile's character limits. Invalid names return 400, missing profiles return 404, and hosts without safe cross-profile scoping return 501 for explicit names.
+
+### GET `/builtin/profiles`
+
+Returns `{ "profiles": [{ "name": "current", "label": "Active profile", "hermes_home": "..." }], "switching_supported": false }` on older single-profile hosts. Hosts with native profile discovery and safe scoping also return `default` and all live named profiles accepted by the host's request validator, with their labels and home paths, and set `switching_supported` to true. Legacy directories with names the host now reserves are omitted. The `current` entry always represents the request's active home, including a custom `HERMES_HOME`. This endpoint reads profile metadata only; it does not load other profiles' memory contents or contact providers.
+
 ### GET `/session-search`
 
 Runs an explicit read-only search over previous Hermes sessions through Hermes' built-in `session_search` tool. This endpoint is not called from `/snapshot` or page load; the UI calls it only after the user submits a query.

@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from contextlib import asynccontextmanager
 from contextvars import copy_context
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -369,6 +370,50 @@ def _builtin_payload(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "total_entries": sum(s["entry_count"] for s in stores),
         "generated_at": time.time(),
     }
+
+
+def _builtin_profiles_payload() -> Dict[str, Any]:
+    """Discover request-addressable homes from Hermes' live-profile registry.
+
+    The current choice also covers custom HERMES_HOME deployments. Never guess
+    profile paths on older hosts: discovery is useful only when the same host
+    can safely scope the subsequent memory read.
+    """
+    entries = [{
+        "name": "current",
+        "label": "Active profile",
+        "hermes_home": str(_hermes_home()),
+    }]
+    try:
+        from hermes_cli.web_server_profiles import _config_profile_scope
+        from hermes_cli.profiles import get_profile_dir, list_profile_names, profile_exists, validate_profile_name
+    except (ImportError, AttributeError):
+        return {"profiles": entries, "switching_supported": False}
+
+    try:
+        from hermes_cli.profiles import read_profile_meta
+    except (ImportError, AttributeError):
+        read_profile_meta = None
+
+    for name in list_profile_names():
+        # Legacy directories can remain in the registry under names the host's
+        # request resolver now rejects. Offer only profiles it can address.
+        try:
+            validate_profile_name(name)
+        except ValueError:
+            continue
+        # A profile may be removed between discovery and this response.
+        if name == "current" or not profile_exists(name):
+            continue
+        home = get_profile_dir(name)
+        meta = read_profile_meta(home) if read_profile_meta else {}
+        title = str(meta.get("bot_title") or meta.get("display_name") or "").strip()
+        entries.append({
+            "name": name,
+            "label": f"{title} ({name})" if title and title != name else name,
+            "hermes_home": str(home),
+        })
+    return {"profiles": entries, "switching_supported": True}
 
 
 def _canonical_session_source(source: str) -> str:
@@ -2600,8 +2645,19 @@ async def status() -> Dict[str, Any]:
 
 
 @router.get("/builtin")
-async def builtin() -> Dict[str, Any]:
-    return _builtin_payload()
+async def builtin(memory_profile: Optional[str] = None) -> Dict[str, Any]:
+    # This selector is independent of the host's ?profile= scope. In particular,
+    # Desktop's ctx.rest continues to scope all other providers to its active bot.
+    requested = (memory_profile or "").strip()
+    if not requested or requested.lower() == "current":
+        return _builtin_payload()
+    async with asynccontextmanager(_profile_request_scope)(requested):
+        return _builtin_payload()
+
+
+@router.get("/builtin/profiles")
+async def builtin_profiles() -> Dict[str, Any]:
+    return _builtin_profiles_payload()
 
 
 @router.get("/session-search")

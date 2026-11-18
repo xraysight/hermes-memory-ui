@@ -160,7 +160,7 @@
       e("div", { className: "memory-ui-section-header" },
         e("div", null,
           e("h2", null, "Built-in memory"),
-          e("p", null, "Read-only view of MEMORY.md and USER.md from the active Hermes profile.")
+          e("p", null, "Read-only view of MEMORY.md and USER.md from the selected Hermes profile.")
         ),
         e(Badge, { tone: "outline" }, builtin.total_entries + " total entries")
       ),
@@ -169,6 +169,80 @@
           return e(BuiltinStoreCard, { key: store.id, store: store });
         })
       )
+    );
+  }
+
+  function BuiltinProfileBrowser(props) {
+    const [profile, setProfile] = useState("current");
+    const [profiles, setProfiles] = useState([{ name: "current", label: "Active profile" }]);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState(null);
+    const [profilesError, setProfilesError] = useState(null);
+    const [revision, setRevision] = useState(0);
+
+    useEffect(function () {
+      let active = true;
+      fetchPluginJSON("/api/plugins/hermes-memory-ui/builtin/profiles")
+        .then(function (payload) {
+          if (active) {
+            if (payload === STALE_PROFILE_RESPONSE) {
+              setProfilesError("The host profile changed. Refresh built-in memory to reload profiles.");
+            } else {
+              setProfiles(payload.profiles || [{ name: "current", label: "Active profile" }]);
+              setProfilesError(null);
+            }
+          }
+        })
+        .catch(function (err) { if (active) setProfilesError(err.message || String(err)); });
+      return function () { active = false; };
+    }, [revision]);
+
+    useEffect(function () {
+      if (profile === "current" && revision === 0) return;
+      let active = true;
+      setError(null);
+      const path = "/api/plugins/hermes-memory-ui/builtin?memory_profile=" + encodeURIComponent(profile);
+      fetchPluginJSON(path)
+        .then(function (payload) {
+          if (active) {
+            if (payload === STALE_PROFILE_RESPONSE) {
+              setError({ profile: profile, source: props.builtin, message: "The host profile changed. Refresh built-in memory to reload." });
+            } else {
+              setResult({ profile: profile, source: props.builtin, builtin: payload });
+            }
+          }
+        })
+        .catch(function (err) { if (active) setError({ profile: profile, source: props.builtin, message: err.message || String(err) }); });
+      return function () { active = false; };
+    }, [profile, revision]);
+
+    const currentError = error && error.profile === profile && (profile !== "current" || error.source === props.builtin)
+      ? error.message : null;
+    const builtin = currentError ? null : profile === "current"
+      ? result && result.profile === "current" && result.source === props.builtin ? result.builtin : props.builtin
+      : result && result.profile === profile ? result.builtin : null;
+    const options = profiles.some(function (item) { return item.name === profile; })
+      ? profiles : profiles.concat([{ name: profile, label: profile + " (unavailable)" }]);
+    return e("div", { className: "memory-ui-section" },
+      e("div", { className: "memory-ui-controls" },
+        e("label", { className: "memory-ui-control" },
+          e("span", null, "Built-in memory profile / bot"),
+          e("select", {
+            className: "memory-ui-select",
+            value: profile,
+            onChange: function (event) { setProfile(event.target.value); setRevision(0); },
+            "aria-label": "Built-in memory profile / bot"
+          }, options.map(function (item) {
+            return e("option", { key: item.name, value: item.name }, item.label || item.name);
+          }))
+        ),
+        e(Button, { variant: "outline", onClick: function () { setRevision(function (value) { return value + 1; }); } }, "Refresh built-in memory")
+      ),
+      e("p", { className: "memory-ui-muted" }, "Select a profile to read its MEMORY.md and USER.md. Provider and session views follow the host's active profile."),
+      e(ErrorBox, { error: profilesError }),
+      e(ErrorBox, { error: currentError }),
+      builtin ? e(BuiltinSection, { builtin: builtin })
+        : currentError ? null : e(EmptyState, null, "Loading built-in memory...")
     );
   }
 
@@ -1096,7 +1170,7 @@
         )
       ),
       snapshot ? e(React.Fragment, null,
-        e(BuiltinSection, { builtin: builtin }),
+        e(BuiltinProfileBrowser, { builtin: builtin }),
         e(Separator, null),
         e(SessionSearchSection, null),
         showHolographic ? e(React.Fragment, null,

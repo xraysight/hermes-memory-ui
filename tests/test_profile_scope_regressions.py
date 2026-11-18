@@ -75,6 +75,84 @@ def test_old_host_rejects_explicit_profile_fail_closed(monkeypatch, tmp_path, pr
     assert "cannot safely scope" in caught.value.detail
 
 
+def test_builtin_profiles_on_old_host_only_offer_current(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    install_module(monkeypatch, "hermes_cli.web_server_profiles", types.ModuleType("hermes_cli.web_server_profiles"))
+
+    assert asyncio.run(module.builtin_profiles()) == {
+        "profiles": [{"name": "current", "label": "Active profile", "hermes_home": str(tmp_path)}],
+        "switching_supported": False,
+    }
+    with pytest.raises(module.HTTPException) as caught:
+        asyncio.run(module.builtin("other"))
+    assert caught.value.status_code == 501
+    assert asyncio.run(module.builtin("current"))["hermes_home"] == str(tmp_path)
+
+
+def test_builtin_profiles_use_native_registry_and_keep_custom_current(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path / "custom-home")
+    host_profiles = types.ModuleType("hermes_cli.web_server_profiles")
+    host_profiles._config_profile_scope = contextlib.nullcontext
+    install_module(monkeypatch, "hermes_cli.web_server_profiles", host_profiles)
+    profiles = types.ModuleType("hermes_cli.profiles")
+    # The native registry, not a filesystem scan, decides whether a bot is live.
+    profiles.list_profile_names = lambda: ["default", "work", "empty", "removed", "test", "hermes", "tmp", "root", "sudo"]
+
+    def validate_profile_name(name):
+        if name in {"test", "hermes", "tmp", "root", "sudo"}:
+            raise ValueError("Reserved profile name")
+
+    profiles.validate_profile_name = validate_profile_name
+    profiles.profile_exists = lambda name: name != "removed"
+    profiles.get_profile_dir = lambda name: tmp_path / "registry" / name
+    profiles.read_profile_meta = lambda home: {"bot_title": "Work bot"} if home.name == "work" else {}
+    install_module(monkeypatch, "hermes_cli.profiles", profiles)
+
+    payload = asyncio.run(module.builtin_profiles())
+    assert payload["switching_supported"] is True
+    assert payload["profiles"] == [
+        {"name": "current", "label": "Active profile", "hermes_home": str(tmp_path / "custom-home")},
+        {"name": "default", "label": "default", "hermes_home": str(tmp_path / "registry" / "default")},
+        {"name": "work", "label": "Work bot (work)", "hermes_home": str(tmp_path / "registry" / "work")},
+        {"name": "empty", "label": "empty", "hermes_home": str(tmp_path / "registry" / "empty")},
+    ]
+
+
+def test_builtin_memory_profile_restores_outer_host_scope(monkeypatch, tmp_path):
+    module = load_plugin_api(monkeypatch, tmp_path)
+    active = contextvars.ContextVar("builtin_home", default=tmp_path)
+    monkeypatch.setattr(module, "_hermes_home", active.get)
+    other_home = tmp_path / "other"
+    (other_home / "memories").mkdir(parents=True)
+    (other_home / "memories" / "MEMORY.md").write_text("Other bot memory", encoding="utf-8")
+    (other_home / "memories" / "USER.md").write_text("Other bot user", encoding="utf-8")
+    host_profiles = types.ModuleType("hermes_cli.web_server_profiles")
+
+    @contextlib.contextmanager
+    def scope(profile):
+        token = active.set(other_home)
+        try:
+            yield
+        finally:
+            active.reset(token)
+
+    host_profiles._config_profile_scope = scope
+    install_module(monkeypatch, "hermes_cli.web_server_profiles", host_profiles)
+
+    async def select_and_restore():
+        payload = await module.builtin("other")
+        # Check inside the request task: asyncio.run restores its caller's
+        # context even when the implementation fails to reset the override.
+        assert active.get() == tmp_path
+        assert (await module.builtin())["hermes_home"] == str(tmp_path)
+        assert (await module.builtin("current"))["hermes_home"] == str(tmp_path)
+        return payload
+
+    payload = asyncio.run(select_and_restore())
+    assert payload["hermes_home"] == str(other_home)
+    assert [store["entries"] for store in payload["stores"]] == [["Other bot memory"], ["Other bot user"]]
+
+
 def test_profile_dependency_unwinds_context_on_cancellation(monkeypatch, tmp_path):
     module = load_plugin_api(monkeypatch, tmp_path)
     active_profile = contextvars.ContextVar("active_profile", default=None)
@@ -259,6 +337,7 @@ def test_dashboard_forwards_profile_and_suppresses_stale_responses():
     payload = json.loads(result.stdout)
     assert payload == {
         "exercisedRequestPaths": [
+            "/api/plugins/hermes-memory-ui/builtin/profiles",
             "/api/plugins/hermes-memory-ui/byterover/query",
             "/api/plugins/hermes-memory-ui/hindsight/contents",
             "/api/plugins/hermes-memory-ui/hindsight/recall",
