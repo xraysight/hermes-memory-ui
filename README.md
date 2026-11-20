@@ -1,3 +1,5 @@
+
+
 # Hermes Memory UI Plugin
 
 Read-only [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin for inspecting memory in Hermes Dashboard and Hermes Desktop.
@@ -63,9 +65,9 @@ Mnemosyne memory view:
 
 ![Hermes Memory UI Mnemosyne memory view](docs/assets/hermes-memory-dashboard7.png)
 
-Byterover memory view:
+ByteRover memory view:
 
-![Hermes Memory UI Byterover memory view](docs/assets/hermes-memory-dashboard6.png)
+![Hermes Memory UI ByteRover memory view](docs/assets/hermes-memory-dashboard6.png)
 
 ## Requirements
 
