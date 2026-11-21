@@ -401,8 +401,45 @@ def _session_lineage_root(db: Any, session_id: str) -> str:
         return session_id
 
 
+def _anchored_view(store: Any, session_id: str, message_id: Any) -> Dict[str, Any]:
+    """The store's anchored view in the dict shape of the old SessionDB.get_anchored_view."""
+    view = store.messages.read_anchored_view(session_id, message_id, window=5, bookend=3)
+
+    def rows(records: Any) -> List[Dict[str, Any]]:
+        return [
+            {
+                "id": record.id,
+                "role": record.role,
+                "content": record.content,
+                "timestamp": record.timestamp,
+                "tool_name": record.tool_name,
+                "tool_calls": list(record.tool_calls),
+                "tool_call_id": record.tool_call_id,
+            }
+            for record in records
+        ]
+
+    return {
+        "window": rows(view.window),
+        "messages_before": view.before,
+        "messages_after": view.after,
+        "bookend_start": rows(view.bookend_start),
+        "bookend_end": rows(view.bookend_end),
+    }
+
+
 def _source_filtered_session_search(query: str, *, source: str, limit: int, sort: str) -> Dict[str, Any]:
     """Run source-aware session search without post-filtering a capped global result set."""
+    try:
+        from persistence_assembly import open_persistence_reader, profile_scope  # type: ignore
+    except ImportError:  # Hermes before the storage interface: its SessionDB serves every read below.
+        return _search_sessions_by_source(None, query, source=source, limit=limit, sort=sort)
+    with open_persistence_reader(profile_scope().profile_dir) as store:
+        return _search_sessions_by_source(store, query, source=source, limit=limit, sort=sort)
+
+
+def _search_sessions_by_source(store: Any, query: str, *, source: str, limit: int, sort: str) -> Dict[str, Any]:
+    # search_messages and get_session still go through hermes_state, which Hermes v0.27.0 removes; read them from the store then.
     from hermes_state import SessionDB  # type: ignore
 
     db = SessionDB()
@@ -418,7 +455,7 @@ def _source_filtered_session_search(query: str, *, source: str, limit: int, sort
     seen_sessions: Dict[str, Dict[str, Any]] = {}
     for row in raw_results:
         raw_sid = row.get("session_id") or ""
-        lineage_root = _session_lineage_root(db, raw_sid)
+        lineage_root = _session_lineage_root(db if store is None else store, raw_sid)
         if lineage_root not in seen_sessions:
             item = dict(row)
             item["_lineage_root"] = lineage_root
@@ -431,7 +468,7 @@ def _source_filtered_session_search(query: str, *, source: str, limit: int, sort
         hit_sid = match_info.get("session_id") or lineage_root
         msg_id = match_info.get("id")
         try:
-            view = db.get_anchored_view(hit_sid, msg_id, window=5, bookend=3)
+            view = db.get_anchored_view(hit_sid, msg_id, window=5, bookend=3) if store is None else _anchored_view(store, hit_sid, msg_id)
         except Exception:
             continue
         try:
