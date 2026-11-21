@@ -16,6 +16,8 @@ def load_plugin_api(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setitem(sys.modules, "hindsight_embed", None)
+    # Session search reads through hermes_state unless a test installs the storage interface.
+    monkeypatch.setitem(sys.modules, "persistence_assembly", None)
     fake_constants = types.ModuleType("hermes_constants")
     fake_constants.get_hermes_home = lambda: str(tmp_path)
     monkeypatch.setitem(sys.modules, "hermes_constants", fake_constants)
@@ -225,6 +227,104 @@ def test_session_search_payload_preserves_custom_source_casing(monkeypatch, tmp_
     assert payload["error"] is None
     assert payload["source"] == "Paperclip"
     assert db_calls[0]["source_filter"] == ["Paperclip"]
+
+
+def test_session_search_payload_reads_anchored_view_from_storage_interface(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeSessionDB:
+        # No get_anchored_view: the anchored view must come from the store.
+        def search_messages(self, **kwargs):
+            calls.append(("search_messages", kwargs["source_filter"]))
+            return [{
+                "id": 43,
+                "session_id": "s2",
+                "role": "user",
+                "source": "telegram",
+                "model": "test-model",
+                "session_started": 123,
+                "snippet": "telegram result",
+            }]
+
+        def get_session(self, session_id):
+            calls.append(("get_session", session_id))
+            return {"source": "telegram", "title": "Telegram memory UI work", "started_at": 123, "model": "test-model"}
+
+    def record(message_id, role, content, timestamp, **tool_fields):
+        fields = {"tool_name": None, "tool_calls": (), "tool_call_id": None, **tool_fields}
+        return types.SimpleNamespace(id=message_id, role=role, content=content, timestamp=timestamp, **fields)
+
+    class FakeMessages:
+        def read_anchored_view(self, session_id, message_id, *, window=5, bookend=3, keep_roles=("user", "assistant")):
+            calls.append(("read_anchored_view", session_id, message_id, window, bookend))
+            return types.SimpleNamespace(
+                window=(
+                    record(42, "assistant", "earlier turn", 2.5, tool_calls=({"id": "call-1"},)),
+                    record(message_id, "user", "find memory from telegram", 3.5),
+                ),
+                before=7,
+                after=2,
+                bookend_start=(record(1, "user", "first turn", 1.5),),
+                bookend_end=(record(99, "tool", "last turn", 9.5, tool_name="lookup", tool_call_id="call-1"),),
+            )
+
+    store = types.SimpleNamespace(messages=FakeMessages())
+
+    class FakeReader:
+        def __init__(self, target):
+            calls.append(("open_persistence_reader", target))
+
+        def __enter__(self):
+            return store
+
+        def __exit__(self, *_exc_info):
+            calls.append(("close",))
+            return False
+
+    fake_hermes_state = types.ModuleType("hermes_state")
+    fake_hermes_state.SessionDB = FakeSessionDB
+    monkeypatch.setitem(sys.modules, "hermes_state", fake_hermes_state)
+
+    fake_tools = types.ModuleType("tools")
+    fake_session_search_tool = types.ModuleType("tools.session_search_tool")
+    fake_session_search_tool._resolve_to_parent = (
+        lambda db, session_id: calls.append(("resolve_to_parent", db is store, session_id)) or "s1"
+    )
+    fake_session_search_tool._format_timestamp = lambda value: f"ts:{value}"
+    monkeypatch.setitem(sys.modules, "tools", fake_tools)
+    monkeypatch.setitem(sys.modules, "tools.session_search_tool", fake_session_search_tool)
+
+    module = load_plugin_api(monkeypatch, tmp_path)
+    fake_persistence = types.ModuleType("persistence_assembly")
+    fake_persistence.profile_scope = lambda: types.SimpleNamespace(profile_dir=tmp_path)
+    fake_persistence.open_persistence_reader = FakeReader
+    monkeypatch.setitem(sys.modules, "persistence_assembly", fake_persistence)
+
+    payload = module._session_search_payload(query="memory", limit=3, sort="newest", source="telegram")
+
+    assert payload["error"] is None
+    assert payload["count"] == 1
+    result = payload["results"][0]
+    assert result["session_id"] == "s2"
+    assert result["parent_session_id"] == "s1"
+    assert result["title"] == "Telegram memory UI work"
+    assert result["bookend_start"] == [{"id": 1, "role": "user", "content": "first turn", "timestamp": 1.5}]
+    assert result["messages"] == [
+        {"id": 42, "role": "assistant", "content": "earlier turn", "timestamp": 2.5, "tool_calls": [{"id": "call-1"}]},
+        {"id": 43, "role": "user", "content": "find memory from telegram", "timestamp": 3.5, "anchor": True},
+    ]
+    assert result["bookend_end"] == [
+        {"id": 99, "role": "tool", "content": "last turn", "timestamp": 9.5, "tool_name": "lookup", "tool_call_id": "call-1"},
+    ]
+    assert (result["messages_before"], result["messages_after"]) == (7, 2)
+    assert calls == [
+        ("open_persistence_reader", tmp_path),
+        ("search_messages", ["telegram"]),
+        ("resolve_to_parent", True, "s2"),
+        ("read_anchored_view", "s2", 43, 5, 3),
+        ("get_session", "s1"),
+        ("close",),
+    ]
 
 
 def test_mem0_config_hides_api_key_and_uses_memory_client(monkeypatch, tmp_path):
